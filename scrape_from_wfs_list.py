@@ -1,0 +1,339 @@
+"""
+GeoCentralis Property Scraper - Using WFS List
+Uses the matricule list from WFS data and scrapes evaluation data via browser automation
+
+CLI usage examples (PowerShell):
+    & "C:\\Program Files\\Python313\\python.exe" "c:\\My Web Sites\\Scraper\\scrape_from_wfs_list.py" --wfs-file "c:\\My Web Sites\\Scraper\\data_raw\\ALL_mat_uev_cr_s.geojson" --headless --limit 50
+    & "C:\\Program Files\\Python313\\python.exe" "c:\\My Web Sites\\Scraper\\scrape_from_wfs_list.py" --wfs-file "c:\\My Web Sites\\Scraper\\data_raw\\ALL_residential_properties.geojson"
+"""
+
+import time
+import argparse
+import json
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+
+class GeoCentralisWFSScraper:
+    def __init__(self, wfs_file='ALL_residential_properties.geojson', headless: bool = False, limit: int | None = None, resume: bool = True):
+        self.portal_url = "https://portail.geocentralis.com/public/sig-web/mrc-appalaches/31084/"
+        self.driver = None
+        self.wfs_file = wfs_file
+        self.properties = []
+        self.results = []
+        self.successful = 0
+        self.failed = 0
+        self.headless = headless
+        self.limit = limit
+        self.resume = resume
+    def load_progress_backup(self):
+        """Load latest progress backup if available"""
+        import glob
+        backups = sorted(glob.glob("progress_backup_*.json"), key=lambda x: int(x.split('_')[-1].split('.')[0]), reverse=True)
+        if backups:
+            latest = backups[0]
+            print(f"Resuming from backup: {latest}")
+            try:
+                with open(latest, 'r', encoding='utf-8') as f:
+                    self.results = json.load(f)
+                scraped_matricules = set(r['matricule'] for r in self.results)
+                # Remove already-scraped properties from self.properties
+                self.properties = [p for p in self.properties if p['matricule'] not in scraped_matricules]
+                print(f"✓ Skipping {len(scraped_matricules)} already-scraped properties")
+            except Exception as e:
+                print(f"❌ Error loading backup: {e}")
+        else:
+            print("No progress backup found; starting fresh.")
+        
+    def load_matricules_from_wfs(self):
+        """Load property matricules from WFS GeoJSON file"""
+        print(f"Loading matricules from {self.wfs_file}...")
+        try:
+            with open(self.wfs_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            features = data.get('features', [])
+            
+            for feature in features:
+                props = feature.get('properties', {})
+                matricule = props.get('matricule')
+                if matricule:
+                    # Note: These layers don't have geometry or address, just matricule
+                    self.properties.append({
+                        'matricule': matricule,
+                        'adresse': props.get('adresse_immeuble', props.get('adresse', 'N/A')),
+                        'geometry': feature.get('geometry')
+                    })
+            
+            if self.limit:
+                self.properties = self.properties[: self.limit]
+            print(f"✓ Loaded {len(self.properties)} properties")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error loading WFS file: {e}")
+            return False
+    
+    def setup_driver(self):
+        """Initialize Chrome WebDriver"""
+        print("Setting up browser...")
+        options = webdriver.ChromeOptions()
+        if self.headless:
+            options.add_argument('--headless=new')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        self.driver = webdriver.Chrome(options=options)
+        self.driver.set_window_size(1920, 1080)
+        print("✓ Browser ready")
+        
+    def load_portal(self):
+        """Load the portal and wait for map"""
+        print(f"\nLoading portal: {self.portal_url}")
+        self.driver.get(self.portal_url)
+        
+        # Wait for map to be present
+        wait = WebDriverWait(self.driver, 30)
+        wait.until(EC.presence_of_element_located((By.ID, "map")))
+        time.sleep(5)  # Extra wait for map to initialize
+        print("✓ Portal loaded")
+        
+    def click_property_by_matricule(self, matricule):
+        """Trigger property selection using the map's selectFeatureByAttribute function"""
+        js_code = f"""
+        var map = null;
+        for (var key in window) {{
+            if (window[key] instanceof L.Map) {{
+                map = window[key];
+                break;
+            }}
+        }}
+        
+        if (map && map.selectFeatureByAttribute) {{
+            try {{
+                map.selectFeatureByAttribute('{matricule}', true, true);
+                return {{success: true}};
+            }} catch(e) {{
+                return {{success: false, error: e.toString()}};
+            }}
+        }} else {{
+            return {{success: false, error: 'Map or function not found'}};
+        }}
+        """
+        
+        try:
+            result = self.driver.execute_script(js_code)
+            if result.get('success'):
+                time.sleep(1.5)  # Wait for sidebar to update
+                return True
+            else:
+                return False
+        except Exception as e:
+            return False
+    
+    def extract_evaluation_data_from_sidebar(self):
+        """Extract all data from the sidebar after a property is selected"""
+        try:
+            # Wait for sidebar to have content
+            time.sleep(0.5)
+            
+            # Find all line containers
+            line_containers = self.driver.find_elements(By.CLASS_NAME, "lineContainer1")
+            
+            if not line_containers:
+                return None
+            
+            data = {}
+            for container in line_containers:
+                try:
+                    left = container.find_element(By.CLASS_NAME, "left1")
+                    right = container.find_element(By.CLASS_NAME, "right1")
+                    
+                    key = left.text.strip().rstrip(':')
+                    value = right.text.strip()
+                    
+                    if key and value:
+                        data[key] = value
+                except:
+                    continue
+            
+            return data if data else None
+            
+        except Exception as e:
+            return None
+    
+    def scrape_property(self, prop, index, total):
+        """Scrape a single property"""
+        matricule = prop['matricule']
+        adresse = prop['adresse']
+        
+        print(f"\n[{index + 1}/{total}] {adresse}")
+        print(f"   Matricule: {matricule}")
+        
+        # Click the property on the map
+        if not self.click_property_by_matricule(matricule):
+            print(f"   ⚠ Could not select property")
+            self.failed += 1
+            return False
+        
+        # Extract data from sidebar
+        data = self.extract_evaluation_data_from_sidebar()
+        
+        if not data:
+            print(f"   ⚠ No data found in sidebar")
+            self.failed += 1
+            return False
+        
+        # Check for valuation fields
+        has_valuation = any(key in data for key in [
+            'Valeur du terrain', 
+            'Valeur du bâtiment', 
+            'Valeur de l\'immeuble'
+        ])
+        
+        if has_valuation:
+            print(f"   ✓ Got evaluation data ({len(data)} fields)")
+            print(f"      Terrain: {data.get('Valeur du terrain', 'N/A')}")
+            print(f"      Bâtiment: {data.get('Valeur du bâtiment', 'N/A')}")
+            valeur_immeuble = data.get("Valeur de l'immeuble", 'N/A')
+            print(f"      Total: {valeur_immeuble}")
+        else:
+            print(f"   ⚠ No valuation data found")
+        
+        # Store result
+        result = {
+            'matricule': matricule,
+            'adresse': adresse,
+            'geometry': prop['geometry'],
+            'evaluation_data': data
+        }
+        self.results.append(result)
+        self.successful += 1
+        
+        return True
+    
+    def scrape_all(self):
+        """Main scraping loop"""
+        print("\n" + "="*80)
+        print("STARTING BULK SCRAPING")
+        print("="*80)
+        
+        total = len(self.properties)
+        start_time = time.time()
+        
+        for i, prop in enumerate(self.properties):
+            self.scrape_property(prop, i, total)
+            
+            # Save progress every 10 properties
+            if (i + 1) % 10 == 0:
+                self.save_progress(i + 1)
+                elapsed = time.time() - start_time
+                avg_time = elapsed / (i + 1)
+                remaining = (total - i - 1) * avg_time
+                print(f"\n   Progress: {i + 1}/{total} ({self.successful} successful, {self.failed} failed)")
+                print(f"   Estimated time remaining: {remaining / 60:.1f} minutes")
+        
+        # Final save
+        self.save_results()
+        
+        elapsed = time.time() - start_time
+        print("\n" + "="*80)
+        print("SCRAPING COMPLETE")
+        print("="*80)
+        print(f"Total properties: {total}")
+        print(f"Successful: {self.successful}")
+        print(f"Failed: {self.failed}")
+        print(f"Total time: {elapsed / 60:.1f} minutes")
+        print(f"Output: all_properties_with_evaluation.json")
+        print(f"Output: all_properties_with_evaluation.geojson")
+    
+    def save_progress(self, count):
+        """Save intermediate progress"""
+        filename = f"progress_backup_{count}.json"
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(self.results, f, ensure_ascii=False, indent=2)
+        print(f"   💾 Progress saved to {filename}")
+    
+    def save_results(self):
+        """Save final results"""
+        # Save as JSON
+        with open('all_properties_with_evaluation.json', 'w', encoding='utf-8') as f:
+            json.dump(self.results, f, ensure_ascii=False, indent=2)
+        
+        # Save as GeoJSON
+        geojson = {
+            "type": "FeatureCollection",
+            "features": []
+        }
+        
+        for result in self.results:
+            feature = {
+                "type": "Feature",
+                "geometry": result['geometry'],
+                "properties": {
+                    "matricule": result['matricule'],
+                    "adresse": result['adresse'],
+                    **result['evaluation_data']
+                }
+            }
+            geojson['features'].append(feature)
+        
+        with open('all_properties_with_evaluation.geojson', 'w', encoding='utf-8') as f:
+            json.dump(geojson, f, ensure_ascii=False, indent=2)
+        
+        print(f"\n✓ Saved {len(self.results)} properties")
+    
+    def cleanup(self):
+        """Close browser"""
+        if self.driver:
+            print("\nClosing browser...")
+            self.driver.quit()
+
+def main():
+    parser = argparse.ArgumentParser(description="Scrape evaluation data using matricules from a WFS GeoJSON file")
+    parser.add_argument('--wfs-file', required=True, help='Path to WFS GeoJSON (e.g., data_raw/ALL_mat_uev_cr_s.geojson)')
+    parser.add_argument('--headless', action='store_true', help='Run Chrome in headless mode')
+    parser.add_argument('--limit', type=int, default=None, help='Limit number of properties to scrape (for testing)')
+    parser.add_argument('--no-resume', action='store_true', help='Do not resume from progress backup; start fresh')
+    args = parser.parse_args()
+
+    print("="*80)
+    print("GEOCENTRALIS PROPERTY SCRAPER - WFS MODE")
+    print("="*80)
+
+    scraper = GeoCentralisWFSScraper(wfs_file=args.wfs_file, headless=args.headless, limit=args.limit, resume=not args.no_resume)
+
+    try:
+        # Load properties from WFS file
+        if not scraper.load_matricules_from_wfs():
+            return
+
+        # Resume from backup if enabled
+        if scraper.resume:
+            scraper.load_progress_backup()
+
+        # Setup browser
+        scraper.setup_driver()
+
+        # Load portal
+        scraper.load_portal()
+
+        # Scrape all properties
+        scraper.scrape_all()
+
+    except KeyboardInterrupt:
+        print("\n\n⚠ Interrupted by user")
+        scraper.save_results()
+
+    except Exception as e:
+        print(f"\n❌ Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+
+    finally:
+        scraper.cleanup()
+
+if __name__ == "__main__":
+    main()
