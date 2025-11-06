@@ -100,6 +100,30 @@ class GeoCentralisWFSScraper:
         time.sleep(5)  # Extra wait for map to initialize
         print("✓ Portal loaded")
         
+    def dismiss_warning_modal(self):
+        """Dismiss any warning/avertissement modal (legal notice) that might be blocking"""
+        try:
+            # Look for "J'accepte" button in the legal notice modal
+            accept_button = self.driver.find_element(By.CSS_SELECTOR, "button[data-dismiss='modal'].btn-primary")
+            accept_button.click()
+            time.sleep(0.5)
+            print("   ✓ Dismissed legal notice modal")
+            return True
+        except:
+            try:
+                # Alternative: try to find by text content
+                buttons = self.driver.find_elements(By.CSS_SELECTOR, "button[data-dismiss='modal']")
+                for button in buttons:
+                    if "accepte" in button.text.lower():
+                        button.click()
+                        time.sleep(0.5)
+                        print("   ✓ Dismissed legal notice modal")
+                        return True
+            except:
+                pass
+            # Modal might not be present, which is fine
+            return False
+    
     def click_property_by_matricule(self, matricule):
         """Trigger property selection using the map's selectFeatureByAttribute function"""
         js_code = f"""
@@ -127,6 +151,8 @@ class GeoCentralisWFSScraper:
             result = self.driver.execute_script(js_code)
             if result.get('success'):
                 time.sleep(1.5)  # Wait for sidebar to update
+                # Dismiss any warning modal that might be blocking
+                self.dismiss_warning_modal()
                 return True
             else:
                 return False
@@ -164,6 +190,102 @@ class GeoCentralisWFSScraper:
         except Exception as e:
             return None
     
+    def click_detailed_fiche_button(self):
+        """Click the 'Voir fiche du rôle détaillée' button to open the modal"""
+        try:
+            wait = WebDriverWait(self.driver, 10)
+            button = wait.until(EC.element_to_be_clickable((By.ID, "btnVoirFicheDetaillee")))
+            button.click()
+            time.sleep(1)  # Wait for modal to open
+            return True
+        except Exception as e:
+            print(f"      ⚠ Could not click detailed fiche button: {e}")
+            return False
+    
+    def extract_modal_data(self):
+        """Extract all detailed information from the modal"""
+        try:
+            wait = WebDriverWait(self.driver, 10)
+            
+            # Wait for modal to be visible
+            modal_body = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "modal-body")))
+            time.sleep(0.5)  # Extra wait for content to render
+            
+            data = {}
+            
+            # Extract all rows with col-sm-5 (label) and col-sm-7 (value) or col-sm-7/col-sm-5 pattern
+            rows = self.driver.find_elements(By.CSS_SELECTOR, ".modal-body .row.margin-bottom-05")
+            
+            for row in rows:
+                try:
+                    # Try different column patterns
+                    labels = row.find_elements(By.CSS_SELECTOR, ".col-sm-5, .col-sm-7")
+                    values = row.find_elements(By.CSS_SELECTOR, ".col-sm-7, .col-sm-5")
+                    
+                    if len(labels) >= 1 and len(values) >= 2:
+                        # First element is label, second is value
+                        label_elem = labels[0]
+                        value_elem = values[1] if len(values) > 1 else values[0]
+                        
+                        label = label_elem.text.strip().rstrip(':').rstrip()
+                        value = value_elem.text.strip()
+                        
+                        if label and value:
+                            data[label] = value
+                    elif len(labels) == 2:
+                        # Two columns, first is label, second is value
+                        label = labels[0].text.strip().rstrip(':').rstrip()
+                        value = labels[1].text.strip()
+                        
+                        if label and value:
+                            data[label] = value
+                except Exception as e:
+                    continue
+            
+            # Also try extracting with text-lg paragraphs inside strong tags
+            strong_elements = self.driver.find_elements(By.CSS_SELECTOR, ".modal-body .text-lg strong")
+            parent_rows = []
+            for strong in strong_elements:
+                try:
+                    # Get parent row
+                    parent = strong.find_element(By.XPATH, "./ancestor::div[contains(@class, 'row')]")
+                    if parent not in parent_rows:
+                        parent_rows.append(parent)
+                        # Try to find label and value within this row
+                        all_p = parent.find_elements(By.CSS_SELECTOR, "p.text-lg")
+                        if len(all_p) >= 2:
+                            label = all_p[0].text.strip().rstrip(':').rstrip()
+                            value = all_p[1].text.strip()
+                            if label and value and label not in data:
+                                data[label] = value
+                except:
+                    continue
+            
+            return data if data else None
+            
+        except Exception as e:
+            print(f"      ⚠ Error extracting modal data: {e}")
+            return None
+    
+    def close_modal(self):
+        """Close the modal dialog"""
+        try:
+            # Try clicking the close button
+            close_button = self.driver.find_element(By.ID, "CloseformModalPageFicheRoleDetaillee")
+            close_button.click()
+            time.sleep(0.5)
+            return True
+        except:
+            try:
+                # Alternative: click the X button
+                close_x = self.driver.find_element(By.CSS_SELECTOR, ".modal-header .close")
+                close_x.click()
+                time.sleep(0.5)
+                return True
+            except Exception as e:
+                print(f"      ⚠ Could not close modal: {e}")
+                return False
+    
     def scrape_property(self, prop, index, total):
         """Scrape a single property"""
         matricule = prop['matricule']
@@ -179,25 +301,45 @@ class GeoCentralisWFSScraper:
             return False
         
         # Extract data from sidebar
-        data = self.extract_evaluation_data_from_sidebar()
+        sidebar_data = self.extract_evaluation_data_from_sidebar()
         
-        if not data:
+        if not sidebar_data:
             print(f"   ⚠ No data found in sidebar")
             self.failed += 1
             return False
         
+        # Click the detailed fiche button to open modal
+        modal_data = {}
+        if self.click_detailed_fiche_button():
+            # Extract detailed data from modal
+            modal_data = self.extract_modal_data() or {}
+            
+            if modal_data:
+                print(f"   ✓ Got detailed modal data ({len(modal_data)} fields)")
+            else:
+                print(f"   ⚠ No data extracted from modal")
+            
+            # Close modal
+            self.close_modal()
+        
+        # Combine sidebar and modal data
+        combined_data = {
+            **sidebar_data,
+            **modal_data
+        }
+        
         # Check for valuation fields
-        has_valuation = any(key in data for key in [
+        has_valuation = any(key in combined_data for key in [
             'Valeur du terrain', 
             'Valeur du bâtiment', 
             'Valeur de l\'immeuble'
         ])
         
         if has_valuation:
-            print(f"   ✓ Got evaluation data ({len(data)} fields)")
-            print(f"      Terrain: {data.get('Valeur du terrain', 'N/A')}")
-            print(f"      Bâtiment: {data.get('Valeur du bâtiment', 'N/A')}")
-            valeur_immeuble = data.get("Valeur de l'immeuble", 'N/A')
+            print(f"   ✓ Got evaluation data ({len(combined_data)} fields)")
+            print(f"      Terrain: {combined_data.get('Valeur du terrain', 'N/A')}")
+            print(f"      Bâtiment: {combined_data.get('Valeur du bâtiment', 'N/A')}")
+            valeur_immeuble = combined_data.get("Valeur de l'immeuble", 'N/A')
             print(f"      Total: {valeur_immeuble}")
         else:
             print(f"   ⚠ No valuation data found")
@@ -207,7 +349,9 @@ class GeoCentralisWFSScraper:
             'matricule': matricule,
             'adresse': adresse,
             'geometry': prop['geometry'],
-            'evaluation_data': data
+            'sidebar_data': sidebar_data,
+            'modal_data': modal_data,
+            'evaluation_data': combined_data
         }
         self.results.append(result)
         self.successful += 1
