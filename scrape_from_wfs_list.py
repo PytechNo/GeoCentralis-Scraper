@@ -300,23 +300,77 @@ class GeoCentralisWFSScraper:
             return None
     
     def close_modal(self):
-        """Close the modal dialog"""
-        try:
-            # Try clicking the close button
-            close_button = self.driver.find_element(By.ID, "CloseformModalPageFicheRoleDetaillee")
-            close_button.click()
-            time.sleep(0.5)
-            return True
-        except:
+        """Close the modal dialog with multiple fallback methods and verification"""
+        max_attempts = 3
+        
+        for attempt in range(max_attempts):
             try:
-                # Alternative: click the X button
-                close_x = self.driver.find_element(By.CSS_SELECTOR, ".modal-header .close")
-                close_x.click()
-                time.sleep(0.5)
-                return True
+                # Method 1: Try clicking the "Annuler" button by ID
+                try:
+                    close_button = self.driver.find_element(By.ID, "CloseformModalPageFicheRoleDetaillee")
+                    close_button.click()
+                    time.sleep(0.8)
+                except:
+                    # Method 2: Try clicking the X button
+                    try:
+                        close_x = self.driver.find_element(By.CSS_SELECTOR, ".modal-header .close")
+                        close_x.click()
+                        time.sleep(0.8)
+                    except:
+                        # Method 3: Try any button with data-dismiss="modal"
+                        try:
+                            dismiss_buttons = self.driver.find_elements(By.CSS_SELECTOR, "button[data-dismiss='modal']")
+                            for btn in dismiss_buttons:
+                                if btn.is_displayed():
+                                    btn.click()
+                                    time.sleep(0.8)
+                                    break
+                        except:
+                            # Method 4: Force close with JavaScript
+                            try:
+                                self.driver.execute_script("""
+                                    var modals = document.querySelectorAll('.modal');
+                                    modals.forEach(function(modal) {
+                                        modal.style.display = 'none';
+                                        modal.classList.remove('in');
+                                    });
+                                    var backdrops = document.querySelectorAll('.modal-backdrop');
+                                    backdrops.forEach(function(backdrop) {
+                                        backdrop.remove();
+                                    });
+                                    document.body.classList.remove('modal-open');
+                                """)
+                                time.sleep(0.5)
+                            except:
+                                pass
+                
+                # Verify modal is actually closed
+                try:
+                    modal = self.driver.find_element(By.CSS_SELECTOR, ".modal.in")
+                    if modal.is_displayed():
+                        # Modal still visible, try again
+                        if attempt < max_attempts - 1:
+                            print(f"      ⚠ Modal still visible, retrying... (attempt {attempt + 2}/{max_attempts})")
+                            time.sleep(0.5)
+                            continue
+                        else:
+                            print(f"      ⚠ Could not close modal after {max_attempts} attempts")
+                            return False
+                    else:
+                        return True
+                except:
+                    # Modal not found or not visible, success!
+                    return True
+                    
             except Exception as e:
-                print(f"      ⚠ Could not close modal: {e}")
-                return False
+                if attempt < max_attempts - 1:
+                    print(f"      ⚠ Error closing modal, retrying... (attempt {attempt + 2}/{max_attempts})")
+                    time.sleep(0.5)
+                else:
+                    print(f"      ⚠ Could not close modal: {e}")
+                    return False
+        
+        return False
     
     def scrape_property(self, prop, index, total):
         """Scrape a single property"""
