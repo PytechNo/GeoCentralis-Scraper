@@ -172,6 +172,8 @@ class GeoCentralisWFSScraper:
                 return None
             
             data = {}
+            owner_names = []
+            
             for container in line_containers:
                 try:
                     left = container.find_element(By.CLASS_NAME, "left1")
@@ -181,9 +183,19 @@ class GeoCentralisWFSScraper:
                     value = right.text.strip()
                     
                     if key and value:
-                        data[key] = value
+                        # Special handling for owner names (Nom field can appear multiple times)
+                        if key == "Nom":
+                            owner_names.append(value)
+                        elif key not in data:
+                            data[key] = value
                 except:
                     continue
+            
+            # Add all owner names as an array if we found any
+            if owner_names:
+                data['Propriétaires'] = owner_names
+                # Keep the first name in 'Nom' for backwards compatibility
+                data['Nom'] = owner_names[0] if len(owner_names) == 1 else '; '.join(owner_names)
             
             return data if data else None
             
@@ -212,6 +224,7 @@ class GeoCentralisWFSScraper:
             time.sleep(0.5)  # Extra wait for content to render
             
             data = {}
+            owner_names = []
             
             # Extract all rows with col-sm-5 (label) and col-sm-7 (value) or col-sm-7/col-sm-5 pattern
             rows = self.driver.find_elements(By.CSS_SELECTOR, ".modal-body .row.margin-bottom-05")
@@ -231,14 +244,22 @@ class GeoCentralisWFSScraper:
                         value = value_elem.text.strip()
                         
                         if label and value:
-                            data[label] = value
+                            # Special handling for owner names (Nom field can appear multiple times)
+                            if label == "Nom":
+                                owner_names.append(value)
+                            elif label not in data:
+                                data[label] = value
                     elif len(labels) == 2:
                         # Two columns, first is label, second is value
                         label = labels[0].text.strip().rstrip(':').rstrip()
                         value = labels[1].text.strip()
                         
                         if label and value:
-                            data[label] = value
+                            # Special handling for owner names
+                            if label == "Nom":
+                                owner_names.append(value)
+                            elif label not in data:
+                                data[label] = value
                 except Exception as e:
                     continue
             
@@ -256,10 +277,21 @@ class GeoCentralisWFSScraper:
                         if len(all_p) >= 2:
                             label = all_p[0].text.strip().rstrip(':').rstrip()
                             value = all_p[1].text.strip()
-                            if label and value and label not in data:
-                                data[label] = value
+                            if label and value:
+                                # Special handling for owner names
+                                if label == "Nom":
+                                    if value not in owner_names:
+                                        owner_names.append(value)
+                                elif label not in data:
+                                    data[label] = value
                 except:
                     continue
+            
+            # Add all owner names as an array if we found any
+            if owner_names:
+                data['Propriétaires'] = owner_names
+                # Keep joined names in 'Nom' for backwards compatibility
+                data['Nom'] = '; '.join(owner_names)
             
             return data if data else None
             
