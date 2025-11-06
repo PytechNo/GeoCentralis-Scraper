@@ -3,3 +3,4 @@ matricules/mat_uev_cr_s_matricules.json
 data_raw/ALL_mat_uev_cr_s.geojson
 all_properties_with_evaluation.json
 all_properties_with_evaluation.geojson
+*.json
