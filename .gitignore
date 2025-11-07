@@ -4,3 +4,4 @@ data_raw/ALL_mat_uev_cr_s.geojson
 all_properties_with_evaluation.json
 all_properties_with_evaluation.geojson
 *.json
+*.geojson
