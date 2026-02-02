@@ -16,9 +16,9 @@ import shutil
 from datetime import datetime
 
 def merge_properties(
-    main_file='all_properties_with_evaluation.json',
-    rescrape_file='rescrape_results_with_modal.json',
-    output_file='all_properties_with_evaluation_merged.json'
+    main_file='data/results/all_properties_with_evaluation.json',
+    rescrape_file='data/results/rescrape_results_with_modal.json',
+    output_file='data/results/all_properties_with_evaluation_merged.json'
 ):
     """
     Merge re-scraped properties into the main file
@@ -58,7 +58,7 @@ def merge_properties(
     
     # Create backup
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_file = f"all_properties_backup_before_merge_{timestamp}.json"
+    backup_file = f"data/results/all_properties_backup_before_merge_{timestamp}.json"
     print(f"\nCreating backup: {backup_file}")
     shutil.copy2(main_file, backup_file)
     print(f"✓ Backup created")

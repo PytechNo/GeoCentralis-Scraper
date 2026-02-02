@@ -53,9 +53,9 @@ def update_properties_with_rescrape(all_properties: List[Dict], rescrape_data: L
 
 def main():
     # File paths
-    all_properties_file = 'all_properties_with_evaluation.json'
-    rescrape_file = 'residential_rescrape_results_all.json'
-    output_file = 'all_properties_with_evaluation_updated.json'
+    all_properties_file = 'data/results/all_properties_with_evaluation.json'
+    rescrape_file = 'data/results/residential_rescrape_results_all.json'
+    output_file = 'data/results/all_properties_with_evaluation_updated.json'
     
     # Load both files
     all_properties = load_json_file(all_properties_file)

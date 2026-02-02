@@ -260,13 +260,13 @@ def run(municipality: str, layers: List[str], out_dir: str, count_only: bool, fe
             if save_matricules:
                 mats = extract_matricules(fc.get("features") or [])
                 if mats:
-                    mats_dir = os.path.join(os.path.dirname(__file__), "matricules")
+                    mats_dir = os.path.join(os.getcwd(), "data", "matricules")
                     os.makedirs(mats_dir, exist_ok=True)
                     with open(os.path.join(mats_dir, f"{layer}_matricules.txt"), "w", encoding="utf-8") as f:
                         f.write("\n".join(mats))
                     with open(os.path.join(mats_dir, f"{layer}_matricules.json"), "w", encoding="utf-8") as f:
                         json.dump(mats, f, ensure_ascii=False, indent=2)
-                    print(f"  -> saved {len(mats)} matricules to matricules/{layer}_matricules.(txt|json)")
+                    print(f"  -> saved {len(mats)} matricules to data/matricules/{layer}_matricules.(txt|json)")
             fetched.append(fc)
         except Exception as e:
             print(f"  !! failed to fetch {layer}: {e}")
@@ -286,7 +286,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Query all public WFS properties for a municipality")
     parser.add_argument("--municipality", "-m", default="31084", help="Municipality ID (e.g., 31084 Thetford Mines)")
     parser.add_argument("--layers", nargs="*", default=CANDIDATE_LAYERS, help="List of layer names (without 'evb:') to try")
-    parser.add_argument("--out-dir", default=os.path.join(os.path.dirname(__file__), "data_raw"), help="Output directory for GeoJSON files")
+    parser.add_argument("--out-dir", default=os.path.join(os.getcwd(), "data", "raw"), help="Output directory for GeoJSON files")
     parser.add_argument("--count-only", action="store_true", help="Only print counts per layer; do not fetch features")
     parser.add_argument("--fetch-all", action="store_true", help="Fetch all features for each layer with hits > 0")
     parser.add_argument("--combine", action="store_true", help="Combine fetched layers into one GeoJSON file")

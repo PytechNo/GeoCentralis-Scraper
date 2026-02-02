@@ -31,7 +31,7 @@ class GeoCentralisWFSScraper:
     def load_progress_backup(self):
         """Load latest progress backup if available"""
         import glob
-        backups = sorted(glob.glob("progress_backup_*.json"), key=lambda x: int(x.split('_')[-1].split('.')[0]), reverse=True)
+        backups = sorted(glob.glob("data/results/progress_backup_*.json"), key=lambda x: int(x.split('_')[-1].split('.')[0]), reverse=True)
         if backups:
             latest = backups[0]
             print(f"Resuming from backup: {latest}")
@@ -481,7 +481,7 @@ class GeoCentralisWFSScraper:
     
     def save_progress(self, count):
         """Save intermediate progress"""
-        filename = f"progress_backup_{count}.json"
+        filename = f"data/results/progress_backup_{count}.json"
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(self.results, f, ensure_ascii=False, indent=2)
         print(f"   💾 Progress saved to {filename}")
@@ -489,7 +489,7 @@ class GeoCentralisWFSScraper:
     def save_results(self):
         """Save final results"""
         # Save as JSON
-        with open('all_properties_with_evaluation.json', 'w', encoding='utf-8') as f:
+        with open('data/results/all_properties_with_evaluation.json', 'w', encoding='utf-8') as f:
             json.dump(self.results, f, ensure_ascii=False, indent=2)
         
         # Save as GeoJSON
@@ -510,7 +510,7 @@ class GeoCentralisWFSScraper:
             }
             geojson['features'].append(feature)
         
-        with open('all_properties_with_evaluation.geojson', 'w', encoding='utf-8') as f:
+        with open('data/results/all_properties_with_evaluation.geojson', 'w', encoding='utf-8') as f:
             json.dump(geojson, f, ensure_ascii=False, indent=2)
         
         print(f"\n✓ Saved {len(self.results)} properties")

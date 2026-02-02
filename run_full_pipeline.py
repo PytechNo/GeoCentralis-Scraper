@@ -25,9 +25,9 @@ from datetime import datetime
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PYTHON = sys.executable  # current Python
 
-QUERY_SCRIPT = os.path.join(SCRIPT_DIR, 'query_all_properties_wfs.py')
-SCRAPER_SCRIPT = os.path.join(SCRIPT_DIR, 'scrape_from_wfs_list.py')
-OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'data_raw')
+QUERY_SCRIPT = os.path.join(SCRIPT_DIR, 'src', 'core', 'query_all_properties_wfs.py')
+SCRAPER_SCRIPT = os.path.join(SCRIPT_DIR, 'src', 'core', 'scrape_from_wfs_list.py')
+OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'data', 'raw')
 DEFAULT_WFS_FILE = os.path.join(OUTPUT_DIR, 'ALL_mat_uev_cr_s.geojson')
 
 

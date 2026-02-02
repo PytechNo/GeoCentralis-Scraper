@@ -37,7 +37,7 @@ def has_modal_data(property_record):
     return has_key_field
 
 
-def analyze_properties(input_file='all_properties_with_evaluation.json'):
+def analyze_properties(input_file='data/results/all_properties_with_evaluation.json'):
     """
     Analyze properties and find those missing modal data
     """
@@ -87,20 +87,20 @@ def analyze_properties(input_file='all_properties_with_evaluation.json'):
         print("="*80)
         
         # Export as simple text file (one matricule per line)
-        txt_file = 'matricules_missing_modal_data.txt'
+        txt_file = 'data/matricules/matricules_missing_modal_data.txt'
         with open(txt_file, 'w', encoding='utf-8') as f:
             for item in missing_modal:
                 f.write(f"{item['matricule']}\n")
         print(f"✓ Saved matricules to: {txt_file}")
         
         # Export as JSON with details
-        json_file = 'matricules_missing_modal_data.json'
+        json_file = 'data/matricules/matricules_missing_modal_data.json'
         with open(json_file, 'w', encoding='utf-8') as f:
             json.dump(missing_modal, f, ensure_ascii=False, indent=2)
         print(f"✓ Saved detailed info to: {json_file}")
         
         # Export as CSV
-        csv_file = 'matricules_missing_modal_data.csv'
+        csv_file = 'data/matricules/matricules_missing_modal_data.csv'
         with open(csv_file, 'w', encoding='utf-8') as f:
             f.write("matricule,adresse,sidebar_fields,modal_fields\n")
             for item in missing_modal:

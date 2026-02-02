@@ -39,8 +39,8 @@ def has_modal_data(property_record):
     return has_key_field
 
 
-def clean_properties(input_file='all_properties_with_evaluation.json', 
-                     output_file='all_properties_with_evaluation_cleaned.json',
+def clean_properties(input_file='data/results/all_properties_with_evaluation.json', 
+                     output_file='data/results/all_properties_with_evaluation_cleaned.json',
                      backup=True):
     """
     Remove properties without modal data from the file
@@ -67,7 +67,7 @@ def clean_properties(input_file='all_properties_with_evaluation.json',
     # Create backup if requested
     if backup:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_file = f"all_properties_with_evaluation_backup_{timestamp}.json"
+        backup_file = f"data/results/all_properties_with_evaluation_backup_{timestamp}.json"
         print(f"\nCreating backup: {backup_file}")
         shutil.copy2(input_file, backup_file)
         print(f"✓ Backup created")
@@ -101,7 +101,7 @@ def clean_properties(input_file='all_properties_with_evaluation.json',
     print(f"✓ Saved {len(properties_with_modal)} properties with complete modal data")
     
     # Save removed properties list for reference
-    removed_file = 'removed_properties_without_modal.json'
+    removed_file = 'data/results/removed_properties_without_modal.json'
     print(f"\nSaving removed properties list to: {removed_file}")
     with open(removed_file, 'w', encoding='utf-8') as f:
         json.dump(properties_without_modal, f, ensure_ascii=False, indent=2)
@@ -127,7 +127,7 @@ def clean_properties(input_file='all_properties_with_evaluation.json',
             }
             geojson['features'].append(feature)
     
-    geojson_file = 'all_properties_with_evaluation_cleaned.geojson'
+    geojson_file = 'data/results/all_properties_with_evaluation_cleaned.geojson'
     with open(geojson_file, 'w', encoding='utf-8') as f:
         json.dump(geojson, f, ensure_ascii=False, indent=2)
     print(f"✓ Saved cleaned GeoJSON: {geojson_file} ({len(geojson['features'])} features)")

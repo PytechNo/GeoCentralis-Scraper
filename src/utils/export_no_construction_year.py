@@ -10,7 +10,7 @@ Usage:
 
 import json
 
-def export_properties_without_year(input_file='all_properties_with_evaluation.json'):
+def export_properties_without_year(input_file='data/results/all_properties_with_evaluation.json'):
     """
     Find and export properties without construction year
     """
@@ -76,14 +76,14 @@ def export_properties_without_year(input_file='all_properties_with_evaluation.js
         return
     
     # Export as JSON
-    json_file = 'properties_without_construction_year.json'
+    json_file = 'data/matricules/properties_without_construction_year.json'
     print(f"\nExporting to JSON: {json_file}")
     with open(json_file, 'w', encoding='utf-8') as f:
         json.dump(without_year, f, ensure_ascii=False, indent=2)
     print(f"✓ Saved {len(without_year)} properties")
     
     # Export as CSV
-    csv_file = 'properties_without_construction_year.csv'
+    csv_file = 'data/matricules/properties_without_construction_year.csv'
     print(f"\nExporting to CSV: {csv_file}")
     with open(csv_file, 'w', encoding='utf-8') as f:
         # Header
@@ -94,7 +94,7 @@ def export_properties_without_year(input_file='all_properties_with_evaluation.js
     print(f"✓ Saved CSV")
     
     # Export matricules only (TXT)
-    txt_file = 'matricules_without_construction_year.txt'
+    txt_file = 'data/matricules/matricules_without_construction_year.txt'
     print(f"\nExporting matricules only: {txt_file}")
     with open(txt_file, 'w', encoding='utf-8') as f:
         for prop in without_year:

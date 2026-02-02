@@ -1,10 +1,10 @@
 """
-GeoCentralis Property Re-scraper - Multi-Worker Version for Residential Construction Years
-Re-scrapes residential properties missing construction year data
+GeoCentralis Property Scraper - Multi-Worker Version
+Uses multiple parallel browser instances to scrape evaluation data faster
 
 CLI usage examples (PowerShell):
-    & "C:\\Program Files\\Python313\\python.exe" rescrape_residential_multiworker.py --workers 4 --headless
-    & "C:\\Program Files\\Python313\\python.exe" rescrape_residential_multiworker.py --workers 2 --limit 50
+    & "C:\\Program Files\\Python313\\python.exe" scrape_from_wfs_list_multiworker.py --wfs-file "data_raw\\ALL_mat_uev_cr_s.geojson" --workers 4 --headless
+    & "C:\\Program Files\\Python313\\python.exe" scrape_from_wfs_list_multiworker.py --wfs-file "data_raw\\ALL_mat_uev_cr_s.geojson" --workers 2 --limit 100
 """
 
 import time
@@ -143,29 +143,22 @@ class WorkerScraper:
             return None
             
     def click_detailed_fiche_button(self):
-        """Click button to open detailed modal with retry logic"""
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                wait = WebDriverWait(self.driver, 10)
-                button = wait.until(EC.element_to_be_clickable((By.ID, "btnVoirFicheDetaillee")))
-                button.click()
-                time.sleep(1.5)  # Wait longer for modal to appear
-                return True
-            except Exception as e:
-                if attempt < max_attempts - 1:
-                    print(f"[Worker {self.worker_id}] Retry clicking modal button (attempt {attempt + 2}/{max_attempts})")
-                    time.sleep(1)
-                else:
-                    print(f"[Worker {self.worker_id}] Failed to click modal button: {e}")
-        return False
+        """Click button to open detailed modal"""
+        try:
+            wait = WebDriverWait(self.driver, 10)
+            button = wait.until(EC.element_to_be_clickable((By.ID, "btnVoirFicheDetaillee")))
+            button.click()
+            time.sleep(1)
+            return True
+        except:
+            return False
             
     def extract_modal_data(self):
-        """Extract data from modal with better error handling"""
+        """Extract data from modal"""
         try:
-            wait = WebDriverWait(self.driver, 15)
+            wait = WebDriverWait(self.driver, 10)
             modal_body = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "modal-body")))
-            time.sleep(1)  # Extra wait for content to render
+            time.sleep(0.5)
             
             data = {}
             owner_names = []
@@ -226,8 +219,7 @@ class WorkerScraper:
                 data['Nom'] = '; '.join(owner_names)
             
             return data if data else None
-        except Exception as e:
-            print(f"[Worker {self.worker_id}] Error extracting modal: {e}")
+        except:
             return None
             
     def close_modal(self):
@@ -292,49 +284,30 @@ class WorkerScraper:
         return False
         
     def scrape_property(self, prop):
-        """Scrape a single property - focus on getting modal data"""
+        """Scrape a single property"""
         matricule = prop['matricule']
         
         if not self.click_property_by_matricule(matricule):
-            print(f"[Worker {self.worker_id}] ⚠ Could not select property {matricule}")
             return None
         
         sidebar_data = self.extract_evaluation_data_from_sidebar()
         if not sidebar_data:
-            print(f"[Worker {self.worker_id}] ⚠ No sidebar data for {matricule}")
             return None
         
         modal_data = {}
-        modal_success = False
-        construction_year_found = False
-        
         if self.click_detailed_fiche_button():
             modal_data = self.extract_modal_data() or {}
-            if modal_data:
-                modal_success = True
-                # Check if we got construction year
-                if 'Année de construction' in modal_data and modal_data['Année de construction']:
-                    construction_year_found = True
-                    print(f"[Worker {self.worker_id}] ✓ Got construction year for {matricule}: {modal_data['Année de construction']}")
-                else:
-                    print(f"[Worker {self.worker_id}] ⚠ Modal opened but no construction year for {matricule}")
-            else:
-                print(f"[Worker {self.worker_id}] ⚠ No modal data extracted for {matricule}")
             self.close_modal()
-        else:
-            print(f"[Worker {self.worker_id}] ⚠ Could not open modal for {matricule}")
         
         combined_data = {**sidebar_data, **modal_data}
         
         return {
             'matricule': matricule,
             'adresse': prop['adresse'],
-            'utilisation_predominante': prop.get('utilisation_predominante', 'N/A'),
+            'geometry': prop['geometry'],
             'sidebar_data': sidebar_data,
             'modal_data': modal_data,
-            'evaluation_data': combined_data,
-            'modal_success': modal_success,
-            'construction_year_found': construction_year_found
+            'evaluation_data': combined_data
         }
         
     def run(self):
@@ -354,21 +327,15 @@ class WorkerScraper:
                     result = self.scrape_property(prop)
                     
                     with self.stats_lock:
-                        if result and result.get('construction_year_found'):
-                            self.stats['with_year'] += 1
-                            self.results_queue.put(result)
-                        elif result and result.get('modal_success'):
-                            self.stats['no_year'] += 1
-                            self.results_queue.put(result)
-                        elif result:
-                            self.stats['partial'] += 1
+                        if result:
+                            self.stats['successful'] += 1
                             self.results_queue.put(result)
                         else:
                             self.stats['failed'] += 1
                         
-                        total = self.stats['with_year'] + self.stats['no_year'] + self.stats['partial'] + self.stats['failed']
+                        total = self.stats['successful'] + self.stats['failed']
                         if total % 10 == 0:
-                            print(f"\n[Progress] {total} total | ✓ {self.stats['with_year']} with year | ⚠ {self.stats['no_year']} no year | ~ {self.stats['partial']} partial | ✗ {self.stats['failed']} failed\n")
+                            print(f"[Worker {self.worker_id}] Progress: {total} total ({self.stats['successful']} success, {self.stats['failed']} failed)")
                     
                     self.task_queue.task_done()
                     
@@ -387,11 +354,12 @@ class WorkerScraper:
 class MultiWorkerCoordinator:
     """Coordinates multiple worker threads"""
     
-    def __init__(self, input_file, num_workers=2, headless=False, limit=None):
-        self.input_file = input_file
+    def __init__(self, wfs_file, num_workers=2, headless=False, limit=None, resume=True):
+        self.wfs_file = wfs_file
         self.num_workers = num_workers
         self.headless = headless
         self.limit = limit
+        self.resume = resume
         self.portal_url = "https://portail.geocentralis.com/public/sig-web/mrc-appalaches/31084/"
         
         self.properties = []
@@ -399,68 +367,88 @@ class MultiWorkerCoordinator:
         self.task_queue = queue.Queue()
         self.results_queue = queue.Queue()
         self.stats_lock = threading.Lock()
-        self.stats = {'with_year': 0, 'no_year': 0, 'partial': 0, 'failed': 0}
+        self.stats = {'successful': 0, 'failed': 0}
         
-    def load_residential_properties(self):
-        """Load residential properties from the export file"""
-        print(f"Loading residential properties from {self.input_file}...")
+    def load_matricules_from_wfs(self):
+        """Load property matricules from WFS GeoJSON file"""
+        print(f"Loading matricules from {self.wfs_file}...")
         try:
-            with open(self.input_file, 'r', encoding='utf-8') as f:
-                all_properties = json.load(f)
+            with open(self.wfs_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            features = data.get('features', [])
             
-            # Filter for residential types only
-            residential_types = [
-                "Logement",
-                "Autres immeubles résidentiels"
-            ]
-            
-            for prop in all_properties:
-                if prop.get('utilisation_predominante') in residential_types:
-                    self.properties.append(prop)
+            for feature in features:
+                props = feature.get('properties', {})
+                matricule = props.get('matricule')
+                if matricule:
+                    self.properties.append({
+                        'matricule': matricule,
+                        'adresse': props.get('adresse_immeuble', props.get('adresse', 'N/A')),
+                        'geometry': feature.get('geometry')
+                    })
             
             if self.limit:
                 self.properties = self.properties[:self.limit]
-            
-            print(f"✓ Loaded {len(self.properties)} residential properties to re-scrape")
-            
-            # Show breakdown
-            for res_type in residential_types:
-                count = sum(1 for p in self.properties if p.get('utilisation_predominante') == res_type)
-                if count > 0:
-                    print(f"  - {res_type}: {count}")
-            
+            print(f"✓ Loaded {len(self.properties)} properties")
             return True
             
         except Exception as e:
-            print(f"❌ Error loading properties file: {e}")
+            print(f"❌ Error loading WFS file: {e}")
             return False
-        
+            
+    def load_progress_backup(self):
+        """Load latest progress backup if available"""
+        import glob
+        backups = sorted(glob.glob("progress_backup_*.json"), key=lambda x: int(x.split('_')[-1].split('.')[0]), reverse=True)
+        if backups:
+            latest = backups[0]
+            print(f"Resuming from backup: {latest}")
+            try:
+                with open(latest, 'r', encoding='utf-8') as f:
+                    self.results = json.load(f)
+                scraped_matricules = set(r['matricule'] for r in self.results)
+                self.properties = [p for p in self.properties if p['matricule'] not in scraped_matricules]
+                print(f"✓ Skipping {len(scraped_matricules)} already-scraped properties")
+                self.stats['successful'] = len(scraped_matricules)
+            except Exception as e:
+                print(f"❌ Error loading backup: {e}")
+        else:
+            print("No progress backup found; starting fresh.")
+            
     def save_progress(self, count):
         """Save intermediate progress"""
-        filename = f"residential_rescrape_progress_{count}.json"
+        filename = f"data/results/progress_backup_{count}.json"
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(self.results, f, ensure_ascii=False, indent=2)
-        print(f"💾 Progress saved to {filename}")
+        print(f"\n💾 Progress saved to {filename}")
         
     def save_results(self):
         """Save final results"""
-        # Save all results
-        with open('residential_rescrape_results_all.json', 'w', encoding='utf-8') as f:
+        with open('data/results/all_properties_with_evaluation.json', 'w', encoding='utf-8') as f:
             json.dump(self.results, f, ensure_ascii=False, indent=2)
         
-        # Save with construction year
-        with_year = [r for r in self.results if r.get('construction_year_found')]
-        with open('residential_rescrape_with_construction_year.json', 'w', encoding='utf-8') as f:
-            json.dump(with_year, f, ensure_ascii=False, indent=2)
+        geojson = {
+            "type": "FeatureCollection",
+            "features": []
+        }
         
-        # Save still missing construction year
-        still_missing = [r for r in self.results if not r.get('construction_year_found')]
-        with open('residential_still_missing_construction_year.json', 'w', encoding='utf-8') as f:
-            json.dump(still_missing, f, ensure_ascii=False, indent=2)
+        for result in self.results:
+            feature = {
+                "type": "Feature",
+                "geometry": result['geometry'],
+                "properties": {
+                    "matricule": result['matricule'],
+                    "adresse": result['adresse'],
+                    **result['evaluation_data']
+                }
+            }
+            geojson['features'].append(feature)
         
-        print(f"\n✓ Saved all results: residential_rescrape_results_all.json")
-        print(f"✓ Saved with construction year: residential_rescrape_with_construction_year.json ({len(with_year)} properties)")
-        print(f"✓ Saved still missing: residential_still_missing_construction_year.json ({len(still_missing)} properties)")
+        with open('data/results/all_properties_with_evaluation.geojson', 'w', encoding='utf-8') as f:
+            json.dump(geojson, f, ensure_ascii=False, indent=2)
+        
+        print(f"\n✓ Saved {len(self.results)} properties")
         
     def collect_results(self):
         """Collect results from the results queue"""
@@ -471,7 +459,7 @@ class MultiWorkerCoordinator:
                     break
                 self.results.append(result)
                 
-                if len(self.results) % 50 == 0:
+                if len(self.results) % 10 == 0:
                     self.save_progress(len(self.results))
             except queue.Empty:
                 continue
@@ -479,17 +467,14 @@ class MultiWorkerCoordinator:
     def run(self):
         """Main coordinator method"""
         print("="*80)
-        print(f"GEOCENTRALIS RESIDENTIAL CONSTRUCTION YEAR RE-SCRAPER ({self.num_workers} workers)")
-        print("Re-scraping residential properties missing construction year")
+        print(f"GEOCENTRALIS MULTI-WORKER SCRAPER ({self.num_workers} workers)")
         print("="*80)
         
-        # Load residential properties
-        if not self.load_residential_properties():
+        if not self.load_matricules_from_wfs():
             return
             
-        if not self.properties:
-            print("No residential properties to process")
-            return
+        if self.resume:
+            self.load_progress_backup()
             
         # Add all properties to task queue
         for prop in self.properties:
@@ -535,30 +520,31 @@ class MultiWorkerCoordinator:
         
         elapsed = time.time() - start_time
         print("\n" + "="*80)
-        print("RE-SCRAPING COMPLETE")
+        print("SCRAPING COMPLETE")
         print("="*80)
-        print(f"Total properties attempted: {len(self.properties)}")
-        print(f"With construction year: {self.stats['with_year']}")
-        print(f"Modal opened but no year: {self.stats['no_year']}")
-        print(f"Partial (sidebar only): {self.stats['partial']}")
+        print(f"Total properties: {len(self.properties)}")
+        print(f"Successful: {self.stats['successful']}")
         print(f"Failed: {self.stats['failed']}")
         print(f"Total time: {elapsed / 60:.1f} minutes")
+        print(f"Output: data/results/all_properties_with_evaluation.json")
+        print(f"Output: data/results/all_properties_with_evaluation.geojson")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Re-scrape residential properties for construction year")
-    parser.add_argument('--input-file', default='properties_without_construction_year.json', 
-                       help='Path to JSON file with properties missing construction year')
-    parser.add_argument('--workers', type=int, default=4, help='Number of parallel workers (default: 4)')
+    parser = argparse.ArgumentParser(description="Multi-worker scraper for GeoCentralis evaluation data")
+    parser.add_argument('--wfs-file', required=True, help='Path to WFS GeoJSON file')
+    parser.add_argument('--workers', type=int, default=2, help='Number of parallel workers (default: 2)')
     parser.add_argument('--headless', action='store_true', help='Run browsers in headless mode')
     parser.add_argument('--limit', type=int, default=None, help='Limit number of properties to scrape')
+    parser.add_argument('--no-resume', action='store_true', help='Do not resume from progress backup')
     args = parser.parse_args()
 
     coordinator = MultiWorkerCoordinator(
-        input_file=args.input_file,
+        wfs_file=args.wfs_file,
         num_workers=args.workers,
         headless=args.headless,
-        limit=args.limit
+        limit=args.limit,
+        resume=not args.no_resume
     )
     
     try:
