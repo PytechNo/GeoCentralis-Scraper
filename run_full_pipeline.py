@@ -85,9 +85,9 @@ def main() -> None:
         sys.exit(rc)
 
     print("\nPipeline complete. Outputs:")
-    print("  - data_raw/ALL_mat_uev_cr_s.geojson (full current property units)")
-    print("  - matricules/mat_uev_cr_s_matricules.(txt|json)")
-    print("  - all_properties_with_evaluation.json + .geojson (results)")
+    print(f"  - {os.path.relpath(args.wfs_file)} (full current property units)")
+    print("  - data/matricules/mat_uev_cr_s_matricules.(txt|json)")
+    print("  - data/results/all_properties_with_evaluation.json + .geojson (results)")
 
 
 if __name__ == '__main__':

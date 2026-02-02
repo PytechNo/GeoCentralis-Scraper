@@ -349,7 +349,7 @@ def main():
     print("="*80)
     
     # Filter residential properties
-    residential_properties = filter_residential_properties('properties_without_construction_year.json')
+    residential_properties = filter_residential_properties('data/matricules/properties_without_construction_year.json')
     
     if not residential_properties:
         print("No residential properties found to scrape!")
@@ -366,21 +366,21 @@ def main():
     print("="*80)
     
     # All results
-    output_file = 'residential_rescrape_results_all.json'
+    output_file = 'data/results/residential_rescrape_results_all.json'
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
     print(f"✓ Saved all results to {output_file}")
     
     # Results with construction year
     with_year = [r for r in results if 'Année de construction' in r.get('modal_data', {}) and r['modal_data']['Année de construction']]
-    output_file_year = 'residential_rescrape_with_construction_year.json'
+    output_file_year = 'data/results/residential_rescrape_with_construction_year.json'
     with open(output_file_year, 'w', encoding='utf-8') as f:
         json.dump(with_year, f, indent=2, ensure_ascii=False)
     print(f"✓ Saved {len(with_year)} properties WITH construction year to {output_file_year}")
     
     # Results still missing construction year
     still_missing = [r for r in results if 'Année de construction' not in r.get('modal_data', {}) or not r['modal_data']['Année de construction']]
-    output_file_missing = 'residential_still_missing_construction_year.json'
+    output_file_missing = 'data/results/residential_still_missing_construction_year.json'
     with open(output_file_missing, 'w', encoding='utf-8') as f:
         json.dump(still_missing, f, indent=2, ensure_ascii=False)
     print(f"✓ Saved {len(still_missing)} properties STILL MISSING construction year to {output_file_missing}")

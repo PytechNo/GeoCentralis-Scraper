@@ -5,8 +5,12 @@ Check if construction year is captured in re-scraped data
 import json
 
 # Load re-scraped data
-with open('rescrape_results_with_modal.json', 'r', encoding='utf-8') as f:
-    data = json.load(f)
+try:
+    with open('data/results/rescrape_results_with_modal.json', 'r', encoding='utf-8') as f:
+        data = json.load(f)
+except FileNotFoundError:
+    print("❌ Error: data/results/rescrape_results_with_modal.json not found")
+    data = []
 
 print(f"Total re-scraped properties: {len(data)}")
 print("\n" + "="*80)
