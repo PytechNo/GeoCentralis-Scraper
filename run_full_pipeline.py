@@ -38,7 +38,7 @@ def run(cmd: list[str]) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Run full WFS -> Evaluation scraping pipeline')
-    parser.add_argument('--municipality', '-m', default='31084', help='Municipality ID (default 31084)')
+    parser.add_argument('--municipality', '-m', default='31015', help='Municipality ID (default 31015)')
     parser.add_argument('--wfs-file', default=DEFAULT_WFS_FILE, help='Path to WFS GeoJSON output (default ALL_mat_uev_cr_s.geojson)')
     parser.add_argument('--refresh-wfs', action='store_true', help='Force re-fetch WFS GeoJSON even if file exists')
     parser.add_argument('--headless', action='store_true', help='Run Chrome headless for scraping')

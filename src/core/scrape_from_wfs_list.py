@@ -18,7 +18,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 class GeoCentralisWFSScraper:
     def __init__(self, wfs_file='ALL_residential_properties.geojson', headless: bool = False, limit: int | None = None, resume: bool = True):
-        self.portal_url = "https://portail.geocentralis.com/public/sig-web/mrc-appalaches/31084/"
+        self.portal_url = "https://portail.geocentralis.com/public/sig-web/mrc-appalaches/31015/"
         self.driver = None
         self.wfs_file = wfs_file
         self.properties = []

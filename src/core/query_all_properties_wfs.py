@@ -284,7 +284,7 @@ def run(municipality: str, layers: List[str], out_dir: str, count_only: bool, fe
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Query all public WFS properties for a municipality")
-    parser.add_argument("--municipality", "-m", default="31084", help="Municipality ID (e.g., 31084 Thetford Mines)")
+    parser.add_argument("--municipality", "-m", default="31015", help="Municipality ID (e.g., 31015)")
     parser.add_argument("--layers", nargs="*", default=CANDIDATE_LAYERS, help="List of layer names (without 'evb:') to try")
     parser.add_argument("--out-dir", default=os.path.join(os.getcwd(), "data", "raw"), help="Output directory for GeoJSON files")
     parser.add_argument("--count-only", action="store_true", help="Only print counts per layer; do not fetch features")

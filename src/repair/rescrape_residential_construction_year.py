@@ -160,7 +160,7 @@ class ResidentialConstructionYearScraper:
         
         try:
             # Navigate to the portal
-            self.driver.get("https://portail.geocentralis.com/public/sig-web/mrc-appalaches/31084/")
+            self.driver.get("https://portail.geocentralis.com/public/sig-web/mrc-appalaches/31015/")
             time.sleep(2)
             
             # Dismiss warning modal

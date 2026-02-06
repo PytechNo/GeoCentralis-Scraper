@@ -360,7 +360,7 @@ class MultiWorkerCoordinator:
         self.headless = headless
         self.limit = limit
         self.resume = resume
-        self.portal_url = "https://portail.geocentralis.com/public/sig-web/mrc-appalaches/31084/"
+        self.portal_url = "https://portail.geocentralis.com/public/sig-web/mrc-appalaches/31015/"
         
         self.properties = []
         self.results = []
