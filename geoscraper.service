@@ -1,0 +1,15 @@
+[Unit]
+Description=GeoCentralis Scraper Service
+After=network.target
+
+[Service]
+# Replace 'root' with the user you want to run the service as (e.g., a dedicated 'scraper' user)
+User=root
+WorkingDirectory=/opt/GeoCentralis-Scraper
+ExecStart=/opt/GeoCentralis-Scraper/start_app.sh --auto-start
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
