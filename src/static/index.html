@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GeoCentralis Scraper</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  [x-cloak]{display:none!important}
+  body{background:#0f172a;color:#e2e8f0;font-family:Inter,system-ui,sans-serif}
+  ::-webkit-scrollbar{width:6px;height:6px}
+  ::-webkit-scrollbar-track{background:#1e293b}
+  ::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}
+  .glow{box-shadow:0 0 20px rgba(59,130,246,.15)}
+  @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+  .pulse-dot{animation:pulse-dot 1.5s ease-in-out infinite}
+  .stat-card{transition:transform .15s}
+  .stat-card:hover{transform:translateY(-2px)}
+  .progress-bar-inner{transition:width .6s ease}
+  .log-entry{font-family:'JetBrains Mono',monospace;font-size:0.75rem;line-height:1.5}
+</style>
+<script>
+tailwind.config={darkMode:'class',theme:{extend:{colors:{brand:'#3b82f6'}}}}
+</script>
+</head>
+<body x-data="dashboard()" x-init="init()" x-cloak>
+
+<!-- Top bar -->
+<div class="bg-slate-900/80 border-b border-slate-700 sticky top-0 z-50 backdrop-blur">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-sm">GC</div>
+      <h1 class="text-lg font-semibold text-white">GeoCentralis Scraper</h1>
+      <span class="text-xs px-2 py-0.5 rounded-full"
+            :class="statusColor(stats.job_status)"
+            x-text="stats.job_status || 'idle'"></span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button @click="importCities()" class="px-3 py-1.5 text-xs rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition">Import Cities</button>
+      <template x-if="stats.job_status==='idle' || stats.job_status==='completed' || stats.job_status==='cancelled'">
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-slate-400">Workers:</label>
+          <input type="number" x-model.number="workersCount" min="1" max="16" class="w-14 px-2 py-1 text-xs rounded bg-slate-800 border border-slate-600 text-white">
+          <label class="flex items-center gap-1 text-xs text-slate-400 cursor-pointer">
+            <input type="checkbox" x-model="headless" class="rounded border-slate-600">
+            Headless
+          </label>
+          <button @click="startJob()" class="px-4 py-1.5 text-xs rounded-lg bg-green-600 hover:bg-green-500 text-white font-medium transition">Start</button>
+        </div>
+      </template>
+      <template x-if="stats.job_status==='running'">
+        <div class="flex gap-2">
+          <button @click="pauseJob()" class="px-3 py-1.5 text-xs rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition">Pause</button>
+          <button @click="stopJob()" class="px-3 py-1.5 text-xs rounded-lg bg-red-600 hover:bg-red-500 text-white transition">Stop</button>
+        </div>
+      </template>
+      <template x-if="stats.job_status==='paused'">
+        <div class="flex gap-2">
+          <button @click="resumeJob()" class="px-3 py-1.5 text-xs rounded-lg bg-green-600 hover:bg-green-500 text-white transition">Resume</button>
+          <button @click="stopJob()" class="px-3 py-1.5 text-xs rounded-lg bg-red-600 hover:bg-red-500 text-white transition">Stop</button>
+        </div>
+      </template>
+    </div>
+  </div>
+  <!-- Global progress bar -->
+  <div class="h-1 bg-slate-800" x-show="stats.total_properties > 0">
+    <div class="h-full bg-blue-500 progress-bar-inner" :style="`width:${globalPct()}%`"></div>
+  </div>
+</div>
+
+<div class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+  <!-- Stat cards -->
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+    <div class="stat-card bg-slate-800/60 border border-slate-700 rounded-xl p-4 glow">
+      <p class="text-xs text-slate-400 mb-1">Cities</p>
+      <p class="text-2xl font-bold text-white" x-text="stats.total_cities || 0"></p>
+      <p class="text-xs text-slate-500 mt-1"><span class="text-green-400" x-text="stats.completed_cities || 0"></span> done</p>
+    </div>
+    <div class="stat-card bg-slate-800/60 border border-slate-700 rounded-xl p-4 glow">
+      <p class="text-xs text-slate-400 mb-1">Properties</p>
+      <p class="text-2xl font-bold text-white" x-text="fmtNum(stats.total_properties)"></p>
+      <p class="text-xs text-slate-500 mt-1">to scrape</p>
+    </div>
+    <div class="stat-card bg-slate-800/60 border border-slate-700 rounded-xl p-4 glow">
+      <p class="text-xs text-slate-400 mb-1">Scraped</p>
+      <p class="text-2xl font-bold text-green-400" x-text="fmtNum(stats.total_scraped)"></p>
+      <p class="text-xs text-slate-500 mt-1" x-text="globalPct()+'%'"></p>
+    </div>
+    <div class="stat-card bg-slate-800/60 border border-slate-700 rounded-xl p-4 glow">
+      <p class="text-xs text-slate-400 mb-1">Failed</p>
+      <p class="text-2xl font-bold text-red-400" x-text="fmtNum(stats.total_failed)"></p>
+      <p class="text-xs text-slate-500 mt-1">errors</p>
+    </div>
+    <div class="stat-card bg-slate-800/60 border border-slate-700 rounded-xl p-4 glow">
+      <p class="text-xs text-slate-400 mb-1">Rate</p>
+      <p class="text-2xl font-bold text-blue-400" x-text="(stats.rate_per_minute||0)+'/min'"></p>
+      <p class="text-xs text-slate-500 mt-1" x-text="fmtDuration(stats.elapsed_seconds)+ ' elapsed'"></p>
+    </div>
+    <div class="stat-card bg-slate-800/60 border border-slate-700 rounded-xl p-4 glow">
+      <p class="text-xs text-slate-400 mb-1">ETA</p>
+      <p class="text-2xl font-bold text-purple-400" x-text="fmtDuration(stats.eta_seconds)"></p>
+      <p class="text-xs text-slate-500 mt-1">remaining</p>
+    </div>
+  </div>
+
+  <!-- Workers -->
+  <div>
+    <h2 class="text-sm font-semibold text-slate-400 mb-3 uppercase tracking-wider">Workers</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <template x-for="w in workers" :key="w.worker_id">
+        <div class="bg-slate-800/60 border border-slate-700 rounded-xl p-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-medium text-white text-sm" x-text="'Worker '+w.worker_id"></span>
+            <span class="text-xs px-2 py-0.5 rounded-full" :class="workerColor(w.status)" x-text="w.status"></span>
+          </div>
+          <p class="text-xs text-slate-400 truncate" x-text="w.current_city_label || '—'"></p>
+          <p class="text-xs text-slate-500 truncate" x-text="w.current_matricule ? 'Mat: '+w.current_matricule : ''"></p>
+          <div class="mt-2 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+            <div class="h-full bg-blue-500 rounded-full progress-bar-inner" :style="`width:${workerPct(w)}%`"></div>
+          </div>
+          <p class="text-xs text-slate-500 mt-1">
+            <span class="text-green-400" x-text="w.properties_scraped||0"></span>
+            <span class="text-slate-600">/</span>
+            <span x-text="w.city_total||0"></span>
+            <template x-if="w.properties_failed > 0">
+              <span class="text-red-400 ml-1" x-text="'('+w.properties_failed+' err)'"></span>
+            </template>
+          </p>
+        </div>
+      </template>
+      <template x-if="workers.length === 0">
+        <div class="col-span-full text-center py-8 text-slate-500 text-sm">No workers active</div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Cities table -->
+  <div>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Cities</h2>
+      <div class="flex items-center gap-2">
+        <select x-model="cityFilter" class="text-xs bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-300">
+          <option value="">All</option>
+          <option value="pending">Pending</option>
+          <option value="fetching_wfs">Fetching WFS</option>
+          <option value="wfs_done">WFS Done</option>
+          <option value="scraping">Scraping</option>
+          <option value="completed">Completed</option>
+          <option value="wfs_failed">Failed</option>
+        </select>
+        <input type="text" x-model="citySearch" placeholder="Search…" class="text-xs bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-300 w-40">
+      </div>
+    </div>
+    <div class="bg-slate-800/40 border border-slate-700 rounded-xl overflow-hidden">
+      <div class="overflow-x-auto max-h-[400px] overflow-y-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-slate-800 sticky top-0">
+            <tr class="text-slate-400 uppercase">
+              <th class="px-4 py-2 text-left">ID</th>
+              <th class="px-4 py-2 text-left">MRC</th>
+              <th class="px-4 py-2 text-left">Municipality</th>
+              <th class="px-4 py-2 text-right">Properties</th>
+              <th class="px-4 py-2 text-right">Scraped</th>
+              <th class="px-4 py-2 text-right">Failed</th>
+              <th class="px-4 py-2 text-left">Status</th>
+              <th class="px-4 py-2 text-left" style="min-width:120px">Progress</th>
+              <th class="px-4 py-2 text-center">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="c in filteredCities()" :key="c.id">
+              <tr class="border-t border-slate-700/50 hover:bg-slate-800/60">
+                <td class="px-4 py-2 text-slate-500" x-text="c.id"></td>
+                <td class="px-4 py-2 text-slate-300" x-text="c.mrc_name"></td>
+                <td class="px-4 py-2 text-white font-medium" x-text="c.municipality_id"></td>
+                <td class="px-4 py-2 text-right text-slate-300" x-text="c.total_properties"></td>
+                <td class="px-4 py-2 text-right text-green-400" x-text="c.scraped_count"></td>
+                <td class="px-4 py-2 text-right text-red-400" x-text="c.failed_count"></td>
+                <td class="px-4 py-2">
+                  <span class="px-2 py-0.5 rounded-full text-[10px]" :class="statusColor(c.status)" x-text="c.status"></span>
+                </td>
+                <td class="px-4 py-2">
+                  <div class="h-1.5 bg-slate-700 rounded-full overflow-hidden" x-show="c.total_properties > 0">
+                    <div class="h-full rounded-full progress-bar-inner"
+                         :class="c.status==='completed'?'bg-green-500':'bg-blue-500'"
+                         :style="`width:${cityPct(c)}%`"></div>
+                  </div>
+                  <span class="text-[10px] text-slate-500" x-text="cityPct(c)+'%'" x-show="c.total_properties > 0"></span>
+                </td>
+                <td class="px-4 py-2 text-center">
+                  <button @click="resetCity(c.id)" class="text-[10px] px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-300"
+                          x-show="c.status==='completed'||c.status==='wfs_failed'">Reset</button>
+                  <button @click="retryFailed(c.id)" class="text-[10px] px-2 py-0.5 rounded bg-amber-700 hover:bg-amber-600 text-white"
+                          x-show="c.failed_count > 0 && c.status==='completed'">Retry</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live log -->
+  <div>
+    <h2 class="text-sm font-semibold text-slate-400 mb-3 uppercase tracking-wider">Live Log</h2>
+    <div class="bg-slate-900 border border-slate-700 rounded-xl p-3 max-h-[300px] overflow-y-auto" id="logBox" x-ref="logBox">
+      <template x-for="l in logs" :key="l.id">
+        <div class="log-entry flex gap-2">
+          <span class="text-slate-600 whitespace-nowrap" x-text="l.created_at ? l.created_at.substring(11,19) : ''"></span>
+          <span class="whitespace-nowrap font-medium"
+                :class="{'text-red-400':l.level==='ERROR','text-amber-400':l.level==='WARN','text-blue-400':l.level==='INFO'}"
+                x-text="l.level" style="min-width:36px"></span>
+          <span class="text-cyan-400 whitespace-nowrap" x-text="l.source" style="min-width:80px"></span>
+          <span class="text-slate-300" x-text="l.message"></span>
+        </div>
+      </template>
+      <template x-if="logs.length===0">
+        <div class="text-slate-600 text-xs text-center py-4">No log entries yet</div>
+      </template>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function dashboard() {
+  return {
+    stats: {},
+    workers: [],
+    cities: [],
+    logs: [],
+    ws: null,
+    workersCount: 4,
+    headless: true,
+    cityFilter: '',
+    citySearch: '',
+
+    init() {
+      this.fetchDashboard();
+      this.connectWS();
+    },
+
+    connectWS() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      this.ws = new WebSocket(`${proto}://${location.host}/ws`);
+      this.ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        this.stats = data.stats || {};
+        this.workers = data.workers || [];
+        this.cities = data.cities || [];
+        // append new logs, keep last 500
+        if (data.logs) {
+          this.logs = data.logs;
+        }
+        this.$nextTick(() => {
+          const box = this.$refs.logBox;
+          if (box) box.scrollTop = box.scrollHeight;
+        });
+      };
+      this.ws.onclose = () => { setTimeout(() => this.connectWS(), 3000); };
+      this.ws.onerror = () => { this.ws.close(); };
+      // send keepalive
+      setInterval(() => { if (this.ws?.readyState === 1) this.ws.send('ping'); }, 30000);
+    },
+
+    async fetchDashboard() {
+      try {
+        const r = await fetch('/api/dashboard');
+        this.stats = await r.json();
+        const c = await fetch('/api/cities');
+        this.cities = await c.json();
+        const w = await fetch('/api/workers');
+        this.workers = await w.json();
+        const l = await fetch('/api/logs?limit=200');
+        this.logs = await l.json();
+      } catch(e) {}
+    },
+
+    async importCities() {
+      const r = await fetch('/api/cities/import', {method:'POST'});
+      const d = await r.json();
+      alert(`Imported ${d.imported} cities (total: ${d.total})`);
+      this.fetchDashboard();
+    },
+
+    async startJob() {
+      const r = await fetch(`/api/jobs/start?workers=${this.workersCount}&headless=${this.headless}`, {method:'POST'});
+      const d = await r.json();
+      if (d.error) alert(d.error);
+    },
+
+    async pauseJob() { await fetch('/api/jobs/pause', {method:'POST'}); },
+    async resumeJob() { await fetch('/api/jobs/resume', {method:'POST'}); },
+    async stopJob() { if(confirm('Stop scraping?')) await fetch('/api/jobs/stop', {method:'POST'}); },
+
+    async resetCity(id) { await fetch(`/api/cities/${id}/reset`, {method:'POST'}); },
+    async retryFailed(id) {
+      const r = await fetch(`/api/cities/${id}/retry-failed`, {method:'POST'});
+      const d = await r.json();
+      alert(`Reset ${d.reset} failed properties for retry`);
+    },
+
+    filteredCities() {
+      let list = this.cities;
+      if (this.cityFilter) list = list.filter(c => c.status === this.cityFilter);
+      if (this.citySearch) {
+        const q = this.citySearch.toLowerCase();
+        list = list.filter(c => c.municipality_id.includes(q) || c.mrc_name.toLowerCase().includes(q));
+      }
+      return list;
+    },
+
+    globalPct() {
+      if (!this.stats.total_properties) return '0';
+      return Math.min(100, ((this.stats.total_scraped || 0) / this.stats.total_properties * 100)).toFixed(1);
+    },
+
+    cityPct(c) {
+      if (!c.total_properties) return '0';
+      return Math.min(100, (c.scraped_count / c.total_properties * 100)).toFixed(1);
+    },
+
+    workerPct(w) {
+      if (!w.city_total) return 0;
+      return Math.min(100, ((w.properties_scraped || 0) / w.city_total * 100));
+    },
+
+    fmtNum(n) {
+      if (n === undefined || n === null) return '0';
+      return n.toLocaleString();
+    },
+
+    fmtDuration(s) {
+      if (!s) return '—';
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      if (h > 0) return `${h}h ${m}m`;
+      if (m > 0) return `${m}m`;
+      return `${s}s`;
+    },
+
+    statusColor(status) {
+      const map = {
+        'idle':         'bg-slate-700 text-slate-300',
+        'pending':      'bg-slate-700 text-slate-300',
+        'fetching_wfs': 'bg-cyan-900 text-cyan-300',
+        'wfs_done':     'bg-indigo-900 text-indigo-300',
+        'running':      'bg-blue-900 text-blue-300',
+        'scraping':     'bg-blue-900 text-blue-300',
+        'paused':       'bg-amber-900 text-amber-300',
+        'completed':    'bg-green-900 text-green-300',
+        'cancelled':    'bg-slate-700 text-slate-400',
+        'wfs_failed':   'bg-red-900 text-red-300',
+        'failed':       'bg-red-900 text-red-300',
+        'stopped':      'bg-slate-700 text-slate-400',
+        'starting':     'bg-cyan-900 text-cyan-300',
+        'loading':      'bg-cyan-900 text-cyan-300',
+        'waiting':      'bg-amber-900 text-amber-300',
+      };
+      return map[status] || 'bg-slate-700 text-slate-300';
+    },
+
+    workerColor(status) {
+      return this.statusColor(status);
+    },
+  };
+}
+</script>
+</body>
+</html>
