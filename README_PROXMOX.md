@@ -50,6 +50,12 @@ This guide will help you set up a Proxmox LXC container to run the GeoCentralis 
 
 ## 4. Run the Application
 
+First, ensure the start script is executable:
+
+```bash
+chmod +x start_app.sh
+```
+
 You can run it manually to test:
 
 ```bash

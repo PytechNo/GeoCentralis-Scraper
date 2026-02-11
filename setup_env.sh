@@ -4,12 +4,12 @@ set -e
 # Update and install system dependencies
 echo "Updating system..."
 apt-get update && apt-get upgrade -y
-apt-get install -y python3 python3-pip python3-venv python3-full wget curl unzip gnupg2 git libnss3 libgconf-2-4 libfontconfig1
+apt-get install -y python3 python3-pip python3-venv python3-full wget curl unzip gnupg2 git libnss3 libgconf-2-4 libfontconfig1 ca-certificates
 
 # Install Google Chrome
 if ! command -v google-chrome &> /dev/null; then
     echo "Installing Google Chrome..."
-    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-archive-keyring.gpg
+    curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-archive-keyring.gpg
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-archive-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list
     apt-get update
     apt-get install -y google-chrome-stable
