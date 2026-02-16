@@ -67,7 +67,6 @@ CREATE TABLE IF NOT EXISTS cities (
     scraped_count   INTEGER DEFAULT 0,
     failed_count    INTEGER DEFAULT 0,
     wfs_fetched_at  TEXT,
-    last_error      TEXT,
     created_at      TEXT    DEFAULT (datetime('now')),
     updated_at      TEXT    DEFAULT (datetime('now'))
 );
@@ -194,14 +193,14 @@ def get_next_city_for_wfs() -> dict | None:
 def mark_city_wfs_done(city_id: int, total_properties: int) -> None:
     with _conn() as c:
         c.execute(
-            "UPDATE cities SET status='wfs_done', total_properties=?, wfs_fetched_at=?, last_error=NULL, updated_at=? WHERE id=?",
+            "UPDATE cities SET status='wfs_done', total_properties=?, wfs_fetched_at=?, updated_at=? WHERE id=?",
             (total_properties, _now(), _now(), city_id),
         )
 
 
-def mark_city_wfs_failed(city_id: int, error: str | None = None) -> None:
+def mark_city_wfs_failed(city_id: int) -> None:
     with _conn() as c:
-        c.execute("UPDATE cities SET status='wfs_failed', last_error=?, updated_at=? WHERE id=?", (error, _now(), city_id))
+        c.execute("UPDATE cities SET status='wfs_failed', updated_at=? WHERE id=?", (_now(), city_id))
 
 
 def claim_city_for_scraping() -> dict | None:

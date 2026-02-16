@@ -150,10 +150,10 @@ class Coordinator:
                         db.mark_city_wfs_done(city_id, len(props))
                         db.add_log("INFO", "wfs", f"{label}: {inserted} properties inserted")
                     else:
-                        db.mark_city_wfs_failed(city_id, "No properties found on any WFS layer")
+                        db.mark_city_wfs_failed(city_id)
                         db.add_log("WARN", "wfs", f"{label}: no properties found")
                 except Exception as exc:
-                    db.mark_city_wfs_failed(city_id, str(exc))
+                    db.mark_city_wfs_failed(city_id)
                     db.add_log("ERROR", "wfs", f"{label}: WFS error – {exc}")
 
                 time.sleep(1)  # small sleep between cities
