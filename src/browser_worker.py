@@ -100,6 +100,8 @@ class BrowserWorker:
                 time.sleep(3)
                 self._dismiss_warning_modal()
                 self._current_portal = url
+                # Initialize map feature selection (required before selectFeatureByAttribute works)
+                self._init_map_selection()
                 return True
             except Exception as exc:
                 self._log("WARN", f"Portal load attempt {attempt+1}/3 failed: {type(exc).__name__}: {str(exc)[:120]}")
@@ -150,46 +152,149 @@ class BrowserWorker:
             except Exception:
                 pass
 
+    def _init_map_selection(self) -> bool:
+        """Initialize the map's EnableSelectFeatureByAttribute after portal load.
+
+        The Leaflet plugin Leaflet.Evb.Map.SelectFeature.js adds selectFeatureByAttribute
+        to L.Map, but it only works after EnableSelectFeatureByAttribute() is called with
+        the correct AJAX URL and municipality ID.  The public sig-web portal only calls
+        EnableSelectFeatureOnMap (click-based), so we must set up the attribute-based one.
+        """
+        js = """
+        // Find the Leaflet map – prefer window.map (used by GeoCentralis portal)
+        var map = window.map;
+        if (!map) {
+            for (var key in window) {
+                try {
+                    if (window[key] && window[key].getZoom && window[key].getCenter && window[key].addLayer) {
+                        map = window[key]; break;
+                    }
+                } catch(e) {}
+            }
+            if (map) window.map = map;
+        }
+        if (!map) return {success: false, error: 'Leaflet map not found'};
+
+        // Get municipality ID from hidden input on the page
+        var idMunEl = document.getElementById('idMunicipaliteStartup');
+        if (!idMunEl) return {success: false, error: 'idMunicipaliteStartup not found'};
+        var munId = idMunEl.value;
+
+        // Get current date for date_evenement
+        var dateEvt = (typeof moment !== 'undefined') ? moment().format('YYYY-MM-DD')
+                    : new Date().toISOString().split('T')[0];
+
+        // Check if EnableSelectFeatureByAttribute exists
+        if (typeof map.EnableSelectFeatureByAttribute !== 'function') {
+            var methods = Object.getOwnPropertyNames(Object.getPrototypeOf(map)).filter(function(k) {
+                return k.indexOf('elect') >= 0 || k.indexOf('nable') >= 0;
+            }).join(', ');
+            return {success: false, error: 'EnableSelectFeatureByAttribute not on map. Related: ' + (methods || 'none')};
+        }
+
+        try {
+            map.EnableSelectFeatureByAttribute({
+                url: '/fiche_role/unite-evaluation.json/',
+                zoomToFeature: false,
+                idMunicipalite: munId,
+                dateEvenement: dateEvt,
+                callback: function(properties) {
+                    window._lastGeoResult = properties;
+                    if (typeof postSelectFeatureOnMapSig === 'function') {
+                        try { postSelectFeatureOnMapSig(properties); } catch(e) {}
+                    }
+                }
+            });
+            return {success: true, munId: munId};
+        } catch(e) {
+            return {success: false, error: 'EnableSelectFeatureByAttribute threw: ' + e.toString()};
+        }
+        """
+        try:
+            res = self.driver.execute_script(js)
+            if res and res.get("success"):
+                self._log("INFO", f"Map selection initialized (municipality: {res.get('munId')})")
+                return True
+            else:
+                error = res.get("error", "unknown") if res else "null result"
+                self._log("WARN", f"Map selection init failed: {error}")
+        except Exception as exc:
+            self._log("WARN", f"Map init error: {type(exc).__name__}: {str(exc)[:150]}")
+        return False
+
     def _select_matricule(self, matricule: str) -> bool:
         js = f"""
-        var map = null;
-        for (var key in window) {{
-            try {{
-                if (window[key] && typeof window[key] === 'object' && window[key]._container) {{
-                    map = window[key]; break;
-                }}
-            }} catch(e) {{}}
-        }}
-        if (!map) {{
-            // try common variable names
-            if (typeof window.map !== 'undefined') map = window.map;
-            else if (typeof window.myMap !== 'undefined') map = window.myMap;
-        }}
-        if (!map) return {{success: false, error: 'Map object not found'}};
-        if (!map.selectFeatureByAttribute) {{
-            // list available methods for debugging
-            var methods = Object.keys(map).filter(function(k) {{
-                return typeof map[k] === 'function' && k.indexOf('select') >= 0;
-            }}).join(', ');
-            return {{success: false, error: 'selectFeatureByAttribute not found. Select-like methods: ' + (methods || 'none')}};
-        }}
+        var map = window.map;
+        if (!map) return {{success: false, error: 'window.map not set'}};
+        if (!map.selectFeatureByAttribute) return {{success: false, error: 'selectFeatureByAttribute not initialized'}};
+
+        window._lastGeoResult = null;
         try {{
-            map.selectFeatureByAttribute('{matricule}', true, true);
+            map.selectFeatureByAttribute('{matricule}', true, false);
             return {{success: true}};
         }} catch(e) {{ return {{success: false, error: e.toString()}}; }}
         """
         try:
             res = self.driver.execute_script(js)
             if res and res.get("success"):
-                time.sleep(1.5)
+                time.sleep(2)  # wait for AJAX response + sidebar population
                 self._dismiss_warning_modal()
                 return True
             else:
                 error = res.get("error", "unknown") if res else "script returned null"
+                # If not initialized, try re-init once
+                if "not initialized" in str(error) or "not set" in str(error):
+                    self._log("WARN", "Map selection not initialized – retrying init")
+                    if self._init_map_selection():
+                        try:
+                            res2 = self.driver.execute_script(js)
+                            if res2 and res2.get("success"):
+                                time.sleep(2)
+                                self._dismiss_warning_modal()
+                                return True
+                        except Exception:
+                            pass
                 self._log("WARN", f"selectMatricule({matricule}) failed: {error}")
         except Exception as exc:
             self._log("WARN", f"selectMatricule({matricule}) JS error: {type(exc).__name__}: {str(exc)[:150]}")
         return False
+
+    def _get_property_via_ajax(self, matricule: str) -> dict | None:
+        """Directly call the GeoCentralis API to get property data, bypassing the map UI."""
+        js = f"""
+        var idMunEl = document.getElementById('idMunicipaliteStartup');
+        if (!idMunEl) return null;
+        var dateEvt = (typeof moment !== 'undefined') ? moment().format('YYYY-MM-DD')
+                    : new Date().toISOString().split('T')[0];
+        var result = null;
+        $.ajax({{
+            type: 'GET',
+            url: '/fiche_role/unite-evaluation.json/',
+            data: {{
+                idFeature: '{matricule}',
+                idMunicipalite: idMunEl.value,
+                dateEvenement: dateEvt
+            }},
+            async: false,
+            dataType: 'json',
+            success: function(response) {{
+                if (response && response.properties) {{
+                    result = response.properties;
+                }} else {{
+                    result = response;
+                }}
+            }},
+            error: function() {{ result = null; }}
+        }});
+        return result;
+        """
+        try:
+            data = self.driver.execute_script(js)
+            if data and isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+        return None
 
     def _extract_sidebar(self) -> dict | None:
         try:
@@ -347,7 +452,13 @@ class BrowserWorker:
             return False
 
         if not self._select_matricule(matricule):
-            db.mark_property_failed(prop_id, "Could not select on map")
+            # Fallback: try direct AJAX call to get property data
+            ajax_data = self._get_property_via_ajax(matricule)
+            if ajax_data:
+                self._log("INFO", f"Got {matricule} via direct AJAX (map select failed)")
+                db.mark_property_scraped(prop_id, ajax_data, {}, ajax_data)
+                return True
+            db.mark_property_failed(prop_id, "Could not select on map and AJAX fallback failed")
             return False
 
         if self.stop_event.is_set():
@@ -355,14 +466,23 @@ class BrowserWorker:
 
         sidebar = self._extract_sidebar()
         if not sidebar:
-            # Log what's on screen for diagnosis
+            # Fallback: check if AJAX result was stored by the callback
             try:
-                page_title = self.driver.title
-                url = self.driver.current_url
-                self._log("WARN", f"No sidebar for {matricule} (page: {page_title}, url: {url[:80]})")
+                ajax_data = self.driver.execute_script("return window._lastGeoResult;")
+                if ajax_data and isinstance(ajax_data, dict):
+                    sidebar = ajax_data
+                    self._log("INFO", f"Using stored AJAX result for {matricule} (sidebar empty)")
             except Exception:
                 pass
-            db.mark_property_failed(prop_id, "No sidebar data")
+
+        if not sidebar:
+            # Last resort: direct AJAX call
+            ajax_data = self._get_property_via_ajax(matricule)
+            if ajax_data:
+                self._log("INFO", f"Got {matricule} via direct AJAX (sidebar empty)")
+                db.mark_property_scraped(prop_id, ajax_data, {}, ajax_data)
+                return True
+            db.mark_property_failed(prop_id, "No sidebar data and AJAX fallback failed")
             return False
 
         if self.stop_event.is_set():
