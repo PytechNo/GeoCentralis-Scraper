@@ -104,7 +104,29 @@ class BrowserWorker:
                 WebDriverWait(self.driver, 60).until(
                     EC.presence_of_element_located((By.ID, "map"))
                 )
-                time.sleep(3)
+                # Wait for the Leaflet map JS object to actually initialize
+                # The #map div appears before Leaflet creates the map instance
+                map_ready = False
+                for wait_i in range(20):  # poll up to 20 seconds
+                    try:
+                        found = self.driver.execute_script("""
+                            if (window.map && window.map.getZoom) return 'window.map';
+                            for (var k in window) {
+                                try { if (window[k] && window[k].getZoom && window[k].getCenter && window[k].addLayer) {
+                                    window.map = window[k]; return k;
+                                }} catch(e) {}
+                            }
+                            return null;
+                        """)
+                        if found:
+                            self._log("INFO", f"Leaflet map found via '{found}' after {wait_i+1}s")
+                            map_ready = True
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(1)
+                if not map_ready:
+                    self._log("WARN", "Leaflet map not found after 20s wait")
                 self._dismiss_warning_modal()
                 self._current_portal = url
                 # Initialize map feature selection (required before selectFeatureByAttribute works)
@@ -288,37 +310,39 @@ class BrowserWorker:
                 if (/^\d{{4,6}}$/.test(parts[i])) {{ munId = parts[i]; break; }}
             }}
         }}
-        if (!munId) return null;
+        if (!munId) return {{error: 'no municipality ID'}};
         var dateEvt = (typeof moment !== 'undefined') ? moment().format('YYYY-MM-DD')
                     : new Date().toISOString().split('T')[0];
-        var result = null;
-        $.ajax({{
-            type: 'GET',
-            url: '/fiche_role/unite-evaluation.json/',
-            data: {{
-                idFeature: '{matricule}',
-                idMunicipalite: munId,
-                dateEvenement: dateEvt
-            }},
-            async: false,
-            dataType: 'json',
-            success: function(response) {{
-                if (response && response.properties) {{
-                    result = response.properties;
-                }} else {{
-                    result = response;
-                }}
-            }},
-            error: function() {{ result = null; }}
-        }});
-        return result;
+
+        // Try XMLHttpRequest (synchronous) – works even if jQuery not loaded
+        try {{
+            var xhr = new XMLHttpRequest();
+            var params = 'idFeature=' + encodeURIComponent('{matricule}')
+                       + '&idMunicipalite=' + encodeURIComponent(munId)
+                       + '&dateEvenement=' + encodeURIComponent(dateEvt);
+            xhr.open('GET', '/fiche_role/unite-evaluation.json/?' + params, false);
+            xhr.setRequestHeader('Accept', 'application/json');
+            xhr.send(null);
+            if (xhr.status === 200) {{
+                var resp = JSON.parse(xhr.responseText);
+                if (resp && resp.properties) return resp.properties;
+                return resp;
+            }} else {{
+                return {{error: 'HTTP ' + xhr.status, statusText: xhr.statusText}};
+            }}
+        }} catch(e) {{
+            return {{error: 'XHR failed: ' + e.toString()}};
+        }}
         """
         try:
             data = self.driver.execute_script(js)
             if data and isinstance(data, dict):
+                if "error" in data:
+                    self._log("WARN", f"AJAX fallback for {matricule}: {data['error']}")
+                    return None
                 return data
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log("WARN", f"AJAX fallback for {matricule} exception: {type(exc).__name__}: {str(exc)[:120]}")
         return None
 
     def _extract_sidebar(self) -> dict | None:
