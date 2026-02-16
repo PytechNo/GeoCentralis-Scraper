@@ -79,7 +79,7 @@ class Coordinator:
                 t = threading.Thread(target=w.run, daemon=True, name=f"worker-{i+1}")
                 t.start()
                 self._worker_threads.append(t)
-                time.sleep(1)  # small stagger – HTTP workers are lightweight
+                time.sleep(0.1)  # tiny stagger – HTTP workers are lightweight
 
             # start monitor thread
             self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True, name="monitor")
@@ -169,7 +169,7 @@ class Coordinator:
     def _monitor_loop(self) -> None:
         """Watch for job completion."""
         while not self._stop_event.is_set():
-            time.sleep(10)
+            time.sleep(3)
             try:
                 if not self._running:
                     break

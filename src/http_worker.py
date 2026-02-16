@@ -63,9 +63,9 @@ class HTTPWorker:
             "X-Requested-With": "XMLHttpRequest",
         })
         adapter = HTTPAdapter(
-            max_retries=Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504]),
-            pool_connections=4,
-            pool_maxsize=4,
+            max_retries=Retry(total=3, backoff_factor=0.3, status_forcelist=[502, 503, 504]),
+            pool_connections=10,
+            pool_maxsize=10,
         )
         s.mount("https://", adapter)
         s.mount("http://", adapter)
@@ -332,14 +332,12 @@ class HTTPWorker:
         self._log("INFO", "Starting up (HTTP mode)…")
 
         try:
-            # Small stagger to avoid all workers hammering the API at once
+            # Tiny stagger to spread out initial connections
             if self.worker_id > 1:
-                stagger = (self.worker_id - 1) * 2
-                self._log("INFO", f"Waiting {stagger}s before starting (stagger)…")
-                for _ in range(stagger):
-                    if self.stop_event.is_set():
-                        return
-                    time.sleep(1)
+                stagger = (self.worker_id - 1) * 0.1
+                self._log("INFO", f"Waiting {stagger:.1f}s before starting (stagger)…")
+                if self.stop_event.wait(stagger):
+                    return
 
             self._setup_session()
             db.update_worker_status(self.worker_id, status="idle")
@@ -420,7 +418,7 @@ class HTTPWorker:
                             failed=failed,
                         )
 
-                        if (scraped + failed) % 10 == 0:
+                        if (scraped + failed) % 2 == 0:
                             db.update_city_counts(city_id)
 
                         # If many consecutive failures, back off
@@ -431,8 +429,8 @@ class HTTPWorker:
                             # Recreate session in case of connection issues
                             self._setup_session()
 
-                        # Small delay between requests to be respectful
-                        time.sleep(0.3)
+                        # Minimal delay between requests
+                        time.sleep(config.REQUEST_DELAY)
 
                 # ── city done ─────────────────────────────────────────
                 db.update_city_counts(city_id)

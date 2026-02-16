@@ -32,11 +32,12 @@ WFS_FALLBACK_LAYERS = [
 # ── Workers / Scraping ────────────────────────────────────────────────────────
 # HTTP workers are lightweight (no Chrome), so we can use more of them.
 # Each worker uses ~5 MB RAM instead of ~300 MB for Selenium.
-DEFAULT_WORKERS = 6
+DEFAULT_WORKERS = 20
 DEFAULT_HEADLESS = True
 MAX_RETRIES = 3
-PROPERTY_BATCH_SIZE = 50                        # properties fetched per DB query
-PROGRESS_BROADCAST_INTERVAL = 2                 # seconds between WS pushes
+PROPERTY_BATCH_SIZE = 200                       # properties fetched per DB query
+PROGRESS_BROADCAST_INTERVAL = 1                 # seconds between WS pushes
+REQUEST_DELAY = 0.05                            # seconds between HTTP requests (per worker)
 
 # ── API ───────────────────────────────────────────────────────────────────────
 API_HOST = "127.0.0.1"
