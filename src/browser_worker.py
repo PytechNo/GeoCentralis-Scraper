@@ -339,7 +339,7 @@ class BrowserWorker:
                 if city is None:
                     # check if there are still pending / fetching cities
                     stats = db.get_dashboard_stats()
-                    if stats["pending_cities"] > 0 or stats["ready_cities"] > 0 or stats["scraping_cities"] > 1:
+                    if stats["pending_cities"] > 0 or stats["ready_cities"] > 0:
                         db.update_worker_status(self.worker_id, status="waiting")
                         time.sleep(3)
                         continue

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -19,6 +20,9 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import config
+
+# Lock to serialise city-claim operations across threads
+_claim_lock = threading.Lock()
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -181,13 +185,14 @@ def get_city(city_id: int) -> dict | None:
 
 def get_next_city_for_wfs() -> dict | None:
     """Atomically claim the next pending city for WFS fetching."""
-    with _conn() as c:
-        row = c.execute(
-            "SELECT * FROM cities WHERE status='pending' ORDER BY id LIMIT 1"
-        ).fetchone()
-        if row:
-            c.execute("UPDATE cities SET status='fetching_wfs', updated_at=? WHERE id=?", (_now(), row["id"]))
-            return _row_to_dict(row)
+    with _claim_lock:
+        with _conn() as c:
+            row = c.execute(
+                "SELECT * FROM cities WHERE status='pending' ORDER BY id LIMIT 1"
+            ).fetchone()
+            if row:
+                c.execute("UPDATE cities SET status='fetching_wfs', updated_at=? WHERE id=?", (_now(), row["id"]))
+                return _row_to_dict(row)
     return None
 
 
@@ -206,13 +211,14 @@ def mark_city_wfs_failed(city_id: int, error: str | None = None) -> None:
 
 def claim_city_for_scraping() -> dict | None:
     """Atomically claim a wfs_done city for scraping. Returns city dict or None."""
-    with _conn() as c:
-        row = c.execute(
-            "SELECT * FROM cities WHERE status='wfs_done' ORDER BY id LIMIT 1"
-        ).fetchone()
-        if row:
-            c.execute("UPDATE cities SET status='scraping', updated_at=? WHERE id=?", (_now(), row["id"]))
-            return _row_to_dict(row)
+    with _claim_lock:
+        with _conn() as c:
+            row = c.execute(
+                "SELECT * FROM cities WHERE status='wfs_done' ORDER BY id LIMIT 1"
+            ).fetchone()
+            if row:
+                c.execute("UPDATE cities SET status='scraping', updated_at=? WHERE id=?", (_now(), row["id"]))
+                return _row_to_dict(row)
     return None
 
 

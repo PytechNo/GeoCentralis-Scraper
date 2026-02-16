@@ -11,6 +11,8 @@ import time
 from typing import Dict, List, Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 import config
 from src.db import add_log
@@ -21,6 +23,14 @@ SESSION.headers.update({
     "Accept": "application/json, text/javascript, */*; q=0.01",
     "Accept-Language": "fr-CA,fr;q=0.9,en;q=0.8",
 })
+
+# Retry adapter for transient HTTP errors (5xx, connection resets)
+_adapter = HTTPAdapter(
+    max_retries=Retry(total=2, backoff_factor=0.5, status_forcelist=[502, 503, 504]),
+    pool_maxsize=config.WFS_PREFETCH_THREADS + 2,
+)
+SESSION.mount("https://", _adapter)
+SESSION.mount("http://", _adapter)
 
 
 # ── internal helpers ──────────────────────────────────────────────────────────
@@ -41,19 +51,29 @@ def _wfs_hits(layer: str, cql: str) -> int:
         "resultType": "hits",
         "CQL_FILTER": cql,
     }
-    r = SESSION.get(config.WFS_URL, params=params, timeout=45)
-    r.raise_for_status()
-    try:
-        data = r.json()
-        return int(data.get("numberMatched", data.get("totalFeatures", 0)))
-    except Exception:
-        text = r.text
-        for key in ('numberMatched="', 'numberOfFeatures="'):
-            if key in text:
-                start = text.index(key) + len(key)
-                end = text.index('"', start)
-                return int(text[start:end])
-        return 0
+    last_exc = None
+    for attempt in range(config.WFS_MAX_RETRIES):
+        try:
+            r = SESSION.get(config.WFS_URL, params=params, timeout=config.WFS_HITS_TIMEOUT)
+            r.raise_for_status()
+            try:
+                data = r.json()
+                return int(data.get("numberMatched", data.get("totalFeatures", 0)))
+            except Exception:
+                text = r.text
+                for key in ('numberMatched="', 'numberOfFeatures="'):
+                    if key in text:
+                        start = text.index(key) + len(key)
+                        end = text.index('"', start)
+                        return int(text[start:end])
+                return 0
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            last_exc = exc
+            if attempt < config.WFS_MAX_RETRIES - 1:
+                wait = 2 ** attempt
+                add_log("WARN", "wfs", f"Hits request failed (attempt {attempt+1}/{config.WFS_MAX_RETRIES}), retry in {wait}s: {exc}")
+                time.sleep(wait)
+    raise last_exc  # all retries exhausted
 
 
 def _wfs_fetch_page(layer: str, cql: str, start: int, count: int) -> Dict:
@@ -68,23 +88,33 @@ def _wfs_fetch_page(layer: str, cql: str, start: int, count: int) -> Dict:
         "CQL_FILTER": cql,
         "srsName": "EPSG:4326",
     }
-    r = SESSION.get(config.WFS_URL, params=params, timeout=config.WFS_TIMEOUT)
-    if r.status_code == 400:
-        # fallback WFS 1.0.0
-        params_1 = {
-            "service": "WFS",
-            "version": "1.0.0",
-            "request": "GetFeature",
-            "typeName": f"evb:{layer}",
-            "outputFormat": "application/json",
-            "maxFeatures": str(count),
-            "CQL_FILTER": cql,
-        }
-        r1 = SESSION.get(config.WFS_URL, params=params_1, timeout=config.WFS_TIMEOUT)
-        r1.raise_for_status()
-        return r1.json()
-    r.raise_for_status()
-    return r.json()
+    last_exc = None
+    for attempt in range(config.WFS_MAX_RETRIES):
+        try:
+            r = SESSION.get(config.WFS_URL, params=params, timeout=config.WFS_TIMEOUT)
+            if r.status_code == 400:
+                # fallback WFS 1.0.0
+                params_1 = {
+                    "service": "WFS",
+                    "version": "1.0.0",
+                    "request": "GetFeature",
+                    "typeName": f"evb:{layer}",
+                    "outputFormat": "application/json",
+                    "maxFeatures": str(count),
+                    "CQL_FILTER": cql,
+                }
+                r1 = SESSION.get(config.WFS_URL, params=params_1, timeout=config.WFS_TIMEOUT)
+                r1.raise_for_status()
+                return r1.json()
+            r.raise_for_status()
+            return r.json()
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            last_exc = exc
+            if attempt < config.WFS_MAX_RETRIES - 1:
+                wait = 2 ** attempt
+                add_log("WARN", "wfs", f"Page fetch failed (start={start}, attempt {attempt+1}/{config.WFS_MAX_RETRIES}), retry in {wait}s")
+                time.sleep(wait)
+    raise last_exc  # all retries exhausted
 
 
 def _wfs_fetch_all(layer: str, cql: str, page_size: int) -> List[Dict]:
@@ -96,7 +126,7 @@ def _wfs_fetch_all(layer: str, cql: str, page_size: int) -> List[Dict]:
         page = data.get("features", [])
         if not page:
             if start == 0:
-                # last-resort full 1.0.0 fetch
+                # last-resort full 1.0.0 fetch (with retry)
                 params_1 = {
                     "service": "WFS",
                     "version": "1.0.0",
@@ -106,9 +136,15 @@ def _wfs_fetch_all(layer: str, cql: str, page_size: int) -> List[Dict]:
                     "maxFeatures": "50000",
                     "CQL_FILTER": cql,
                 }
-                r1 = SESSION.get(config.WFS_URL, params=params_1, timeout=120)
-                if r1.ok:
-                    features.extend(r1.json().get("features", []))
+                for attempt in range(config.WFS_MAX_RETRIES):
+                    try:
+                        r1 = SESSION.get(config.WFS_URL, params=params_1, timeout=config.WFS_TIMEOUT * 2)
+                        if r1.ok:
+                            features.extend(r1.json().get("features", []))
+                        break
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                        if attempt < config.WFS_MAX_RETRIES - 1:
+                            time.sleep(2 ** attempt)
             break
         features.extend(page)
         start += len(page)

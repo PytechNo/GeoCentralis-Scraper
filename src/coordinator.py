@@ -28,7 +28,7 @@ class Coordinator:
         self._stop_event = threading.Event()
         self._pause_event = threading.Event()
         self._worker_threads: list[threading.Thread] = []
-        self._wfs_thread: threading.Thread | None = None
+        self._wfs_threads: list[threading.Thread] = []
         self._monitor_thread: threading.Thread | None = None
         self._job_id: int | None = None
         self._running = False
@@ -60,9 +60,12 @@ class Coordinator:
 
             db.add_log("INFO", "coordinator", f"Starting job #{self._job_id} with {workers} workers (headless={headless})")
 
-            # start WFS pre-fetcher
-            self._wfs_thread = threading.Thread(target=self._wfs_prefetch_loop, daemon=True, name="wfs-prefetch")
-            self._wfs_thread.start()
+            # start WFS pre-fetchers (multiple threads to avoid one slow city blocking everything)
+            self._wfs_threads = []
+            for i in range(config.WFS_PREFETCH_THREADS):
+                t = threading.Thread(target=self._wfs_prefetch_loop, daemon=True, name=f"wfs-prefetch-{i+1}")
+                t.start()
+                self._wfs_threads.append(t)
 
             # start browser workers (staggered)
             self._worker_threads = []
@@ -114,8 +117,8 @@ class Coordinator:
         # wait for workers (with timeout)
         for t in self._worker_threads:
             t.join(timeout=30)
-        if self._wfs_thread:
-            self._wfs_thread.join(timeout=10)
+        for t in self._wfs_threads:
+            t.join(timeout=10)
 
         if self._job_id:
             db.update_job_status(self._job_id, "cancelled")
@@ -174,7 +177,8 @@ class Coordinator:
 
                 # check if all workers are done
                 alive = any(t.is_alive() for t in self._worker_threads)
-                if not alive and self._wfs_thread and not self._wfs_thread.is_alive():
+                wfs_alive = any(t.is_alive() for t in self._wfs_threads)
+                if not alive and not wfs_alive:
                     # everyone finished
                     if self._job_id:
                         db.update_job_progress(self._job_id)
