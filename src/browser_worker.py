@@ -175,10 +175,20 @@ class BrowserWorker:
         }
         if (!map) return {success: false, error: 'Leaflet map not found'};
 
-        // Get municipality ID from hidden input on the page
+        // Get municipality ID – try hidden input first, fall back to URL path
+        var munId = '';
         var idMunEl = document.getElementById('idMunicipaliteStartup');
-        if (!idMunEl) return {success: false, error: 'idMunicipaliteStartup not found'};
-        var munId = idMunEl.value;
+        if (idMunEl && idMunEl.value) {
+            munId = idMunEl.value;
+        }
+        if (!munId) {
+            // Extract from URL: /public/sig-web/{mrc}/{municipality_id}/
+            var parts = window.location.pathname.replace(/\/+$/, '').split('/');
+            for (var i = parts.length - 1; i >= 0; i--) {
+                if (/^\d{4,6}$/.test(parts[i])) { munId = parts[i]; break; }
+            }
+        }
+        if (!munId) return {success: false, error: 'municipality ID not found (input empty, URL: ' + window.location.pathname + ')'};
 
         // Get current date for date_evenement
         var dateEvt = (typeof moment !== 'undefined') ? moment().format('YYYY-MM-DD')
@@ -262,8 +272,16 @@ class BrowserWorker:
     def _get_property_via_ajax(self, matricule: str) -> dict | None:
         """Directly call the GeoCentralis API to get property data, bypassing the map UI."""
         js = f"""
+        var munId = '';
         var idMunEl = document.getElementById('idMunicipaliteStartup');
-        if (!idMunEl) return null;
+        if (idMunEl && idMunEl.value) {{ munId = idMunEl.value; }}
+        if (!munId) {{
+            var parts = window.location.pathname.replace(/\/+$/, '').split('/');
+            for (var i = parts.length - 1; i >= 0; i--) {{
+                if (/^\d{{4,6}}$/.test(parts[i])) {{ munId = parts[i]; break; }}
+            }}
+        }}
+        if (!munId) return null;
         var dateEvt = (typeof moment !== 'undefined') ? moment().format('YYYY-MM-DD')
                     : new Date().toISOString().split('T')[0];
         var result = null;
@@ -272,7 +290,7 @@ class BrowserWorker:
             url: '/fiche_role/unite-evaluation.json/',
             data: {{
                 idFeature: '{matricule}',
-                idMunicipalite: idMunEl.value,
+                idMunicipalite: munId,
                 dateEvenement: dateEvt
             }},
             async: false,
