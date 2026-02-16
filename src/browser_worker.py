@@ -55,25 +55,18 @@ class BrowserWorker:
         opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--disable-blink-features=AutomationControlled")
         # ── Container-friendly flags (Proxmox / LXC / Docker) ──
-        opts.add_argument("--disable-software-rasterizer")
         opts.add_argument("--disable-extensions")
-        opts.add_argument("--disable-background-networking")
         opts.add_argument("--disable-default-apps")
         opts.add_argument("--disable-sync")
         opts.add_argument("--disable-translate")
         opts.add_argument("--no-first-run")
         opts.add_argument("--disable-setuid-sandbox")
-        opts.add_argument("--disable-background-timer-throttling")
-        opts.add_argument("--disable-renderer-backgrounding")
-        opts.add_argument("--disable-backgrounding-occluded-windows")
-        opts.add_argument("--disable-ipc-flooding-protection")
         opts.add_argument("--disable-hang-monitor")
-        opts.add_argument("--js-flags=--max-old-space-size=256")
-        opts.add_argument("--remote-debugging-pipe")  # more stable than WebSocket
+        opts.add_argument("--js-flags=--max-old-space-size=512")
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_experimental_option("useAutomationExtension", False)
         self.driver = webdriver.Chrome(options=opts)
-        self.driver.set_page_load_timeout(90)
+        self.driver.set_page_load_timeout(120)
         self.driver.set_script_timeout(30)
         self.driver.set_window_size(1280, 720)
 
@@ -161,15 +154,29 @@ class BrowserWorker:
         js = f"""
         var map = null;
         for (var key in window) {{
-            if (window[key] instanceof L.Map) {{ map = window[key]; break; }}
-        }}
-        if (map && map.selectFeatureByAttribute) {{
             try {{
-                map.selectFeatureByAttribute('{matricule}', true, true);
-                return {{success: true}};
-            }} catch(e) {{ return {{success: false, error: e.toString()}}; }}
+                if (window[key] && typeof window[key] === 'object' && window[key]._container) {{
+                    map = window[key]; break;
+                }}
+            }} catch(e) {{}}
         }}
-        return {{success: false, error: 'Map or function not found'}};
+        if (!map) {{
+            // try common variable names
+            if (typeof window.map !== 'undefined') map = window.map;
+            else if (typeof window.myMap !== 'undefined') map = window.myMap;
+        }}
+        if (!map) return {{success: false, error: 'Map object not found'}};
+        if (!map.selectFeatureByAttribute) {{
+            // list available methods for debugging
+            var methods = Object.keys(map).filter(function(k) {{
+                return typeof map[k] === 'function' && k.indexOf('select') >= 0;
+            }}).join(', ');
+            return {{success: false, error: 'selectFeatureByAttribute not found. Select-like methods: ' + (methods || 'none')}};
+        }}
+        try {{
+            map.selectFeatureByAttribute('{matricule}', true, true);
+            return {{success: true}};
+        }} catch(e) {{ return {{success: false, error: e.toString()}}; }}
         """
         try:
             res = self.driver.execute_script(js)
@@ -177,8 +184,11 @@ class BrowserWorker:
                 time.sleep(1.5)
                 self._dismiss_warning_modal()
                 return True
-        except Exception:
-            pass
+            else:
+                error = res.get("error", "unknown") if res else "script returned null"
+                self._log("WARN", f"selectMatricule({matricule}) failed: {error}")
+        except Exception as exc:
+            self._log("WARN", f"selectMatricule({matricule}) JS error: {type(exc).__name__}: {str(exc)[:150]}")
         return False
 
     def _extract_sidebar(self) -> dict | None:
@@ -329,6 +339,13 @@ class BrowserWorker:
         if self.stop_event.is_set():
             return False
 
+        # Check browser is still alive before trying
+        try:
+            current = self.driver.current_url
+        except Exception:
+            db.mark_property_failed(prop_id, "Browser dead")
+            return False
+
         if not self._select_matricule(matricule):
             db.mark_property_failed(prop_id, "Could not select on map")
             return False
@@ -338,6 +355,13 @@ class BrowserWorker:
 
         sidebar = self._extract_sidebar()
         if not sidebar:
+            # Log what's on screen for diagnosis
+            try:
+                page_title = self.driver.title
+                url = self.driver.current_url
+                self._log("WARN", f"No sidebar for {matricule} (page: {page_title}, url: {url[:80]})")
+            except Exception:
+                pass
             db.mark_property_failed(prop_id, "No sidebar data")
             return False
 
