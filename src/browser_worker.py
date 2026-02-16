@@ -353,7 +353,7 @@ class BrowserWorker:
                 if not portal_url.endswith("/"):
                     portal_url += "/"
                 if not self._load_portal(portal_url):
-                    db.mark_city_wfs_failed(city_id)
+                    db.mark_city_wfs_failed(city_id, "Could not load portal UI")
                     self._log("ERROR", f"Cannot load portal for {city_label}")
                     continue
 
