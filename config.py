@@ -30,9 +30,9 @@ WFS_FALLBACK_LAYERS = [
 ]
 
 # ── Workers / Scraping ────────────────────────────────────────────────────────
-# In LXC/Proxmox containers, use fewer workers (4-6). Each worker spawns
-# a Chrome process needing ~200-400 MB RAM.  12 workers ≈ 3-5 GB RAM.
-DEFAULT_WORKERS = 3
+# HTTP workers are lightweight (no Chrome), so we can use more of them.
+# Each worker uses ~5 MB RAM instead of ~300 MB for Selenium.
+DEFAULT_WORKERS = 6
 DEFAULT_HEADLESS = True
 MAX_RETRIES = 3
 PROPERTY_BATCH_SIZE = 50                        # properties fetched per DB query

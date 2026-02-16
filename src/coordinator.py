@@ -18,7 +18,7 @@ from typing import Optional
 import config
 from src import db
 from src.wfs_client import fetch_municipality_properties
-from src.browser_worker import BrowserWorker
+from src.http_worker import HTTPWorker
 
 
 class Coordinator:
@@ -40,7 +40,7 @@ class Coordinator:
     def running(self) -> bool:
         return self._running
 
-    def start(self, workers: int = config.DEFAULT_WORKERS, headless: bool = config.DEFAULT_HEADLESS) -> dict:
+    def start(self, workers: int = config.DEFAULT_WORKERS, headless: bool = True) -> dict:
         with self._lock:
             if self._running:
                 return {"error": "Job already running"}
@@ -70,17 +70,16 @@ class Coordinator:
             # start browser workers (staggered)
             self._worker_threads = []
             for i in range(workers):
-                w = BrowserWorker(
+                w = HTTPWorker(
                     worker_id=i + 1,
                     job_id=self._job_id,
-                    headless=headless,
                     stop_event=self._stop_event,
                     pause_event=self._pause_event,
                 )
                 t = threading.Thread(target=w.run, daemon=True, name=f"worker-{i+1}")
                 t.start()
                 self._worker_threads.append(t)
-                time.sleep(15)  # stagger worker starts – each Chrome needs time to stabilize
+                time.sleep(1)  # small stagger – HTTP workers are lightweight
 
             # start monitor thread
             self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True, name="monitor")
