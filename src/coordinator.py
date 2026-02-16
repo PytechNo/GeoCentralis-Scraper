@@ -80,7 +80,7 @@ class Coordinator:
                 t = threading.Thread(target=w.run, daemon=True, name=f"worker-{i+1}")
                 t.start()
                 self._worker_threads.append(t)
-                time.sleep(2)  # stagger browser launches
+                time.sleep(5)  # stagger worker starts to avoid resource spike
 
             # start monitor thread
             self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True, name="monitor")

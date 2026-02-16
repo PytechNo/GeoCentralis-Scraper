@@ -54,7 +54,7 @@ class BrowserWorker:
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--disable-blink-features=AutomationControlled")
-        # ── Proxmox / LXC / container-friendly flags ──
+        # ── Container-friendly flags (Proxmox / LXC / Docker) ──
         opts.add_argument("--disable-software-rasterizer")
         opts.add_argument("--disable-extensions")
         opts.add_argument("--disable-background-networking")
@@ -62,17 +62,26 @@ class BrowserWorker:
         opts.add_argument("--disable-sync")
         opts.add_argument("--disable-translate")
         opts.add_argument("--no-first-run")
-        opts.add_argument("--single-process")  # reduces memory in containers
         opts.add_argument("--disable-setuid-sandbox")
-        opts.add_argument("--js-flags=--max-old-space-size=256")  # limit JS heap
+        opts.add_argument("--disable-background-timer-throttling")
+        opts.add_argument("--disable-renderer-backgrounding")
+        opts.add_argument("--disable-backgrounding-occluded-windows")
+        opts.add_argument("--disable-ipc-flooding-protection")
+        opts.add_argument("--disable-hang-monitor")
+        opts.add_argument("--js-flags=--max-old-space-size=256")
+        opts.add_argument("--remote-debugging-pipe")  # more stable than WebSocket
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_experimental_option("useAutomationExtension", False)
         self.driver = webdriver.Chrome(options=opts)
-        self.driver.set_page_load_timeout(60)
+        self.driver.set_page_load_timeout(90)
+        self.driver.set_script_timeout(30)
         self.driver.set_window_size(1280, 720)
 
     def _ensure_browser(self) -> None:
-        """Restart browser if it died."""
+        """Start or restart Chrome if needed."""
+        if self.driver is None:
+            self._setup_driver()
+            return
         try:
             _ = self.driver.current_url
         except Exception:
@@ -81,17 +90,18 @@ class BrowserWorker:
                 self.driver.quit()
             except Exception:
                 pass
+            self.driver = None
             self._setup_driver()
             self._current_portal = None
 
     def _load_portal(self, url: str) -> bool:
-        """Navigate to a city portal and wait for the map. Retries once on failure."""
-        for attempt in range(2):
+        """Navigate to a city portal and wait for the map. Retries up to 3 times with fresh browser."""
+        for attempt in range(3):
             self._ensure_browser()
-            self._log("INFO", f"Loading portal {url}" + (f" (retry {attempt})" if attempt else ""))
+            self._log("INFO", f"Loading portal {url}" + (f" (attempt {attempt+1}/3)" if attempt else ""))
             try:
                 self.driver.get(url)
-                WebDriverWait(self.driver, 30).until(
+                WebDriverWait(self.driver, 60).until(
                     EC.presence_of_element_located((By.ID, "map"))
                 )
                 time.sleep(3)
@@ -99,20 +109,24 @@ class BrowserWorker:
                 self._current_portal = url
                 return True
             except Exception as exc:
-                self._log("WARN", f"Portal load attempt {attempt+1} failed: {exc}")
-                if attempt == 0:
-                    # Kill and restart the browser for the retry
-                    try:
-                        self.driver.quit()
-                    except Exception:
-                        pass
+                self._log("WARN", f"Portal load attempt {attempt+1}/3 failed: {type(exc).__name__}: {str(exc)[:120]}")
+                # Kill browser completely and restart fresh for next attempt
+                try:
+                    self.driver.quit()
+                except Exception:
+                    pass
+                self.driver = None
+                self._current_portal = None
+                if attempt < 2:
+                    wait = 5 * (attempt + 1)  # 5s, 10s backoff
+                    self._log("INFO", f"Waiting {wait}s before retry…")
+                    time.sleep(wait)
                     try:
                         self._setup_driver()
-                    except Exception:
-                        pass
-                    self._current_portal = None
-                    time.sleep(2)
-        self._log("ERROR", f"Failed to load portal after 2 attempts: {url}")
+                    except Exception as setup_exc:
+                        self._log("ERROR", f"Failed to restart browser: {setup_exc}")
+                        time.sleep(10)
+        self._log("ERROR", f"Failed to load portal after 3 attempts: {url}")
         return False
 
     def _quit(self) -> None:
@@ -349,7 +363,7 @@ class BrowserWorker:
         self._log("INFO", "Starting up…")
 
         try:
-            self._setup_driver()
+            # Don't launch Chrome yet – wait until we actually claim a city
             db.update_worker_status(self.worker_id, status="idle")
 
             while not self.stop_event.is_set():
