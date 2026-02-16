@@ -80,7 +80,7 @@ class Coordinator:
                 t = threading.Thread(target=w.run, daemon=True, name=f"worker-{i+1}")
                 t.start()
                 self._worker_threads.append(t)
-                time.sleep(8)  # stagger worker starts – each one may launch Chrome
+                time.sleep(15)  # stagger worker starts – each Chrome needs time to stabilize
 
             # start monitor thread
             self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True, name="monitor")

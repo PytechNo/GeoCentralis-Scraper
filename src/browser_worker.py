@@ -62,7 +62,14 @@ class BrowserWorker:
         opts.add_argument("--no-first-run")
         opts.add_argument("--disable-setuid-sandbox")
         opts.add_argument("--disable-hang-monitor")
-        opts.add_argument("--js-flags=--max-old-space-size=512")
+        opts.add_argument("--disable-software-rasterizer")
+        opts.add_argument("--disable-background-networking")
+        opts.add_argument("--disable-backgrounding-occluded-windows")
+        opts.add_argument("--disable-renderer-backgrounding")
+        opts.add_argument("--disable-features=TranslateUI,VizDisplayCompositor")
+        opts.add_argument("--renderer-process-limit=1")
+        opts.add_argument("--memory-pressure-off")
+        opts.add_argument("--js-flags=--max-old-space-size=256")
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_experimental_option("useAutomationExtension", False)
         self.driver = webdriver.Chrome(options=opts)
@@ -526,6 +533,14 @@ class BrowserWorker:
 
         try:
             # Don't launch Chrome yet – wait until we actually claim a city
+            # Stagger Chrome launches to avoid overwhelming container resources
+            if self.worker_id > 1:
+                stagger = (self.worker_id - 1) * 15
+                self._log("INFO", f"Waiting {stagger}s before starting (stagger)…")
+                for _ in range(stagger):
+                    if self.stop_event.is_set():
+                        return
+                    time.sleep(1)
             db.update_worker_status(self.worker_id, status="idle")
 
             while not self.stop_event.is_set():
