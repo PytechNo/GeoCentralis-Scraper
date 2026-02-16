@@ -54,10 +54,22 @@ class BrowserWorker:
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--disable-blink-features=AutomationControlled")
+        # ── Proxmox / LXC / container-friendly flags ──
+        opts.add_argument("--disable-software-rasterizer")
+        opts.add_argument("--disable-extensions")
+        opts.add_argument("--disable-background-networking")
+        opts.add_argument("--disable-default-apps")
+        opts.add_argument("--disable-sync")
+        opts.add_argument("--disable-translate")
+        opts.add_argument("--no-first-run")
+        opts.add_argument("--single-process")  # reduces memory in containers
+        opts.add_argument("--disable-setuid-sandbox")
+        opts.add_argument("--js-flags=--max-old-space-size=256")  # limit JS heap
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_experimental_option("useAutomationExtension", False)
         self.driver = webdriver.Chrome(options=opts)
-        self.driver.set_window_size(1920, 1080)
+        self.driver.set_page_load_timeout(60)
+        self.driver.set_window_size(1280, 720)
 
     def _ensure_browser(self) -> None:
         """Restart browser if it died."""
@@ -73,21 +85,35 @@ class BrowserWorker:
             self._current_portal = None
 
     def _load_portal(self, url: str) -> bool:
-        """Navigate to a city portal and wait for the map."""
-        self._ensure_browser()
-        self._log("INFO", f"Loading portal {url}")
-        try:
-            self.driver.get(url)
-            WebDriverWait(self.driver, 30).until(
-                EC.presence_of_element_located((By.ID, "map"))
-            )
-            time.sleep(3)
-            self._dismiss_warning_modal()
-            self._current_portal = url
-            return True
-        except Exception as exc:
-            self._log("ERROR", f"Failed to load portal: {exc}")
-            return False
+        """Navigate to a city portal and wait for the map. Retries once on failure."""
+        for attempt in range(2):
+            self._ensure_browser()
+            self._log("INFO", f"Loading portal {url}" + (f" (retry {attempt})" if attempt else ""))
+            try:
+                self.driver.get(url)
+                WebDriverWait(self.driver, 30).until(
+                    EC.presence_of_element_located((By.ID, "map"))
+                )
+                time.sleep(3)
+                self._dismiss_warning_modal()
+                self._current_portal = url
+                return True
+            except Exception as exc:
+                self._log("WARN", f"Portal load attempt {attempt+1} failed: {exc}")
+                if attempt == 0:
+                    # Kill and restart the browser for the retry
+                    try:
+                        self.driver.quit()
+                    except Exception:
+                        pass
+                    try:
+                        self._setup_driver()
+                    except Exception:
+                        pass
+                    self._current_portal = None
+                    time.sleep(2)
+        self._log("ERROR", f"Failed to load portal after 2 attempts: {url}")
+        return False
 
     def _quit(self) -> None:
         try:
@@ -367,8 +393,11 @@ class BrowserWorker:
                 if not portal_url.endswith("/"):
                     portal_url += "/"
                 if not self._load_portal(portal_url):
-                    db.mark_city_wfs_failed(city_id, "Could not load portal UI")
-                    self._log("ERROR", f"Cannot load portal for {city_label}")
+                    # Revert city to wfs_done so another worker can try it
+                    from src.db import _conn, _now
+                    with _conn() as c:
+                        c.execute("UPDATE cities SET status='wfs_done', updated_at=? WHERE id=?", (_now(), city_id))
+                    self._log("ERROR", f"Cannot load portal for {city_label} – releasing city")
                     continue
 
                 db.update_worker_status(self.worker_id, status="running")
@@ -376,6 +405,7 @@ class BrowserWorker:
                 # ── scrape loop ───────────────────────────────────────
                 scraped = 0
                 failed = 0
+                consecutive_failures = 0
                 while not self.stop_event.is_set():
                     # pause gate
                     while self.pause_event.is_set() and not self.stop_event.is_set():
@@ -402,8 +432,10 @@ class BrowserWorker:
 
                         if ok:
                             scraped += 1
+                            consecutive_failures = 0
                         else:
                             failed += 1
+                            consecutive_failures += 1
 
                         db.update_worker_status(
                             self.worker_id,
@@ -412,9 +444,24 @@ class BrowserWorker:
                             failed=failed,
                         )
 
-                        # periodic city count refresh (every 25 properties)
-                        if (scraped + failed) % 25 == 0:
+                        # periodic city count refresh (every 10 properties)
+                        if (scraped + failed) % 10 == 0:
                             db.update_city_counts(city_id)
+
+                        # if too many consecutive failures, browser is likely broken
+                        # reload the portal to recover
+                        if consecutive_failures >= 10:
+                            self._log("WARN", f"10 consecutive failures – reloading portal for {city_label}")
+                            consecutive_failures = 0
+                            try:
+                                self.driver.quit()
+                            except Exception:
+                                pass
+                            self._setup_driver()
+                            self._current_portal = None
+                            if not self._load_portal(portal_url):
+                                self._log("ERROR", f"Cannot reload portal – abandoning {city_label}")
+                                break
 
                 # ── city done ─────────────────────────────────────────
                 db.update_city_counts(city_id)

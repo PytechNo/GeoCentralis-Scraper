@@ -220,6 +220,14 @@ async def _broadcast_loop():
 
 
 def _build_ws_payload() -> dict:
+    # refresh counts for all actively-scraped cities so the dashboard is accurate
+    try:
+        for city in db.get_all_cities():
+            if city["status"] == "scraping":
+                db.update_city_counts(city["id"])
+    except Exception:
+        pass
+
     stats = db.get_dashboard_stats()
     # compute rate
     if stats.get("job_started_at"):
