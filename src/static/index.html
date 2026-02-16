@@ -39,6 +39,7 @@ tailwind.config={darkMode:'class',theme:{extend:{colors:{brand:'#3b82f6'}}}}
     <div class="flex items-center gap-2">
       <button @click="importCities()" class="px-3 py-1.5 text-xs rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition">Import Cities</button>
       <button @click="resetAll()" class="px-3 py-1.5 text-xs rounded-lg bg-red-900/80 hover:bg-red-800 text-red-200 border border-red-800 transition" title="Force reset app state">Hard Reset</button>
+      <button @click="wipeAll()" class="px-3 py-1.5 text-xs rounded-lg bg-red-600 hover:bg-red-500 text-white border border-red-500 transition" title="Delete ALL data and restart">Wipe DB</button>
       <template x-if="stats.job_status==='idle' || stats.job_status==='completed' || stats.job_status==='cancelled'">
         <div class="flex items-center gap-2">
           <label class="text-xs text-slate-400">Workers:</label>
@@ -301,6 +302,15 @@ function dashboard() {
       if(confirm('HARD RESET: This will stop all jobs and reset all "scraping" or "running" items to a pending/ready state. \n\nYour scraped data is safe.\n\nContinue?')) {
         await fetch('/api/jobs/reset_all', {method:'POST'});
         alert('System reset.');
+        this.fetchDashboard();
+      }
+    },
+
+    async wipeAll() {
+      if(confirm('DANGER: This will DELETE ALL SCRAPED DATA, logs, and reset everything.\nIt will then re-import cities from the config file.\n\nAre you sure you want to WIPE THE DATABASE?')) {
+        const r = await fetch('/api/jobs/wipe', {method:'POST'});
+        const d = await r.json();
+        alert(`Database wiped. Re-imported ${d.imported_cities} cities.`);
         this.fetchDashboard();
       }
     },

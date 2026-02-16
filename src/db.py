@@ -536,3 +536,21 @@ def reset_all_state() -> None:
         c.execute("UPDATE properties SET status='pending', attempts=attempts WHERE status='scraping'")
 
     add_log("WARN", "system", "Hard reset performed - state cleared")
+
+
+def wipe_all_data() -> None:
+    """
+    Wipe all data from the database.
+    Deletes all records from cities, properties, jobs, workers, logs.
+    """
+    with _conn() as c:
+        c.execute("DELETE FROM workers")
+        c.execute("DELETE FROM jobs")
+        c.execute("DELETE FROM properties")
+        c.execute("DELETE FROM cities")
+        c.execute("DELETE FROM logs")
+        # Reset auto-increment counters if needed (sqlite_sequence)
+        c.execute("DELETE FROM sqlite_sequence WHERE name IN ('workers','jobs','properties','cities','logs')")
+
+    add_log("WARN", "system", "Database wiped completely")
+

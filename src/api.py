@@ -152,6 +152,22 @@ def api_reset_all():
     return {"status": "reset"}
 
 
+@app.post("/api/jobs/wipe")
+def api_wipe_all():
+    # Stop any running process
+    if coordinator.running:
+        coordinator.stop()
+
+    # Wipe database
+    db.wipe_all_data()
+
+    # Automatically re-import cities so we are ready to scrape
+    count = db.import_cities_from_file(config.CITIES_FILE)
+
+    return {"status": "wiped", "imported_cities": count}
+
+
+
 # ── exports ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/export/{city_id}/geojson")
