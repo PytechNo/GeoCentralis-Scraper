@@ -277,14 +277,23 @@ class BrowserWorker:
 
     def _scrape_one(self, prop: dict) -> bool:
         """Scrape a single property.  Returns True on success."""
+        if self.stop_event.is_set():
+            return False
+
         prop_id = prop["id"]
         matricule = prop["matricule"]
 
         db.mark_property_scraping(prop_id)
         db.update_worker_status(self.worker_id, matricule=matricule)
 
+        if self.stop_event.is_set():
+            return False
+
         if not self._select_matricule(matricule):
             db.mark_property_failed(prop_id, "Could not select on map")
+            return False
+
+        if self.stop_event.is_set():
             return False
 
         sidebar = self._extract_sidebar()
@@ -292,8 +301,13 @@ class BrowserWorker:
             db.mark_property_failed(prop_id, "No sidebar data")
             return False
 
+        if self.stop_event.is_set():
+            return False
+
         modal: dict = {}
         if self._click_detailed_fiche():
+            if self.stop_event.is_set():
+                return False
             modal = self._extract_modal() or {}
             self._close_modal()
 

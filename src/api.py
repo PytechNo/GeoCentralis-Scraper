@@ -141,6 +141,17 @@ def api_stop():
     return coordinator.stop()
 
 
+@app.post("/api/jobs/reset_all")
+def api_reset_all():
+    # Attempt to stop gracefully
+    if coordinator.running:
+        coordinator.stop()
+    
+    # Force reset DB state
+    db.reset_all_state()
+    return {"status": "reset"}
+
+
 # ── exports ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/export/{city_id}/geojson")

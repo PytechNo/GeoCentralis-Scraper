@@ -518,3 +518,21 @@ def export_all_geojson() -> dict:
             },
         })
     return {"type": "FeatureCollection", "features": features}
+
+
+def reset_all_state() -> None:
+    """Hard reset: clear all workers, cancel jobs, reset sticking points."""
+    with _conn() as c:
+        # Clear workers and cancel jobs
+        c.execute("DELETE FROM workers")
+        time_now = _now()
+        c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE status IN ('running','paused')", (time_now,))
+
+        # Reset cities stuck in 'scraping' or 'fetching_wfs'
+        c.execute("UPDATE cities SET status='wfs_done' WHERE status='scraping'")
+        c.execute("UPDATE cities SET status='pending' WHERE status='fetching_wfs'")
+
+        # Reset any properties stuck in 'scraping'
+        c.execute("UPDATE properties SET status='pending', attempts=attempts WHERE status='scraping'")
+
+    add_log("WARN", "system", "Hard reset performed - state cleared")
